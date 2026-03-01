@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Call Bot – Architecture & Setup Guide</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --surface: #111827;
+      --surface2: #1a2235;
+      --border: rgba(99,102,241,0.25);
+      --accent: #6366f1;
+      --accent2: #22d3ee;
+      --accent3: #a78bfa;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --pink: #ec4899;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --radius: 14px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── BACKGROUND ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99,102,241,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(34,211,238,0.10) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(167,139,250,0.06) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 40px 24px 80px; }
+
+    /* ── HEADER ── */
+    .header { text-align: center; margin-bottom: 60px; }
+    .badge {
+      display: inline-block;
+      background: rgba(99,102,241,0.15);
+      border: 1px solid var(--border);
+      color: var(--accent3);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800;
+      background: linear-gradient(135deg, #fff 30%, var(--accent3) 70%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.2;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 1.05rem;
+      margin-top: 12px;
+    }
+
+    /* ── SECTION HEADINGS ── */
+    .section-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── GLASS CARD ── */
+    .card {
+      background: rgba(17,24,39,0.7);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    /* ═══════════════════════════════════════
+       FLOW DIAGRAM
+    ═══════════════════════════════════════ */
+    .flow-section { margin-bottom: 70px; }
+
+    .flow-diagram {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      padding: 40px 20px;
+    }
+
+    /* Row of nodes */
+    .flow-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0;
+      width: 100%;
+    }
+
+    /* Individual node */
+    .node {
+      position: relative;
+      background: var(--surface2);
+      border: 1.5px solid rgba(99,102,241,0.35);
+      border-radius: 12px;
+      padding: 18px 22px;
+      min-width: 180px;
+      max-width: 220px;
+      text-align: center;
+      cursor: default;
+      transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.28s ease;
+      animation: fadeSlideIn 0.6s both;
+    }
+    .node:hover {
+      transform: translateY(-4px) scale(1.03);
+      box-shadow: 0 10px 40px rgba(99,102,241,0.25);
+      border-color: rgba(99,102,241,0.7);
+      z-index: 10;
+    }
+
+    /* Color variants */
+    .node.caller    { border-color: rgba(16,185,129,0.5); }
+    .node.caller:hover { box-shadow: 0 10px 40px rgba(16,185,129,0.3); border-color: var(--green); }
+    .node.twilio   { border-color: rgba(239,68,68,0.4); }
+    .node.twilio:hover { box-shadow: 0 10px 40px rgba(239,68,68,0.25); border-color: var(--red); }
+    .node.stt       { border-color: rgba(34,211,238,0.4); }
+    .node.stt:hover { box-shadow: 0 10px 40px rgba(34,211,238,0.25); border-color: var(--accent2); }
+    .node.ai        { border-color: rgba(167,139,250,0.5); }
+    .node.ai:hover  { box-shadow: 0 10px 40px rgba(167,139,250,0.35); border-color: var(--accent3); }
+    .node.tts       { border-color: rgba(245,158,11,0.4); }
+    .node.tts:hover { box-shadow: 0 10px 40px rgba(245,158,11,0.25); border-color: var(--yellow); }
+    .node.backend   { border-color: rgba(99,102,241,0.5); }
+    .node.backend:hover { box-shadow: 0 10px 40px rgba(99,102,241,0.35); border-color: var(--accent); }
+
+    .node-icon { font-size: 2rem; margin-bottom: 8px; display: block; }
+    .node-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .node-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .node-service {
+      font-size: 0.72rem;
+      font-family: 'Fira Code', monospace;
+      margin-top: 5px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+    .tag-green  { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+    .tag-red    { background: rgba(239,68,68,0.15); color: #fca5a5; }
+    .tag-cyan   { background: rgba(34,211,238,0.15); color: #67e8f9; }
+    .tag-purple { background: rgba(167,139,250,0.15); color: #c4b5fd; }
+    .tag-yellow { background: rgba(245,158,11,0.15); color: #fde68a; }
+    .tag-indigo { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+
+    /* ── ARROWS ── */
+    .arrow-v {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0;
+      gap: 0;
+    }
+    .arrow-line-v {
+      width: 2px;
+      height: 34px;
+      background: linear-gradient(to bottom, var(--accent), var(--accent2));
+      position: relative;
+      animation: pulseLine 2s ease-in-out infinite;
+    }
+    .arrow-head-v {
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 10px solid var(--accent2);
+    }
+    .arrow-label {
+      font-size: 0.65rem;
+      font-family: 'Fira Code', monospace;
+      color: var(--accent3);
+      text-align: center;
+      max-width: 120px;
+      padding: 2px 6px;
+      background: rgba(99,102,241,0.1);
+      border-radius: 4px;
+      margin: 4px 0;
+      white-space: nowrap;
+    }
+
+    /* Horizontal arrow between nodes in a row */
+    .arrow-h {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .arrow-line-h {
+      height: 2px;
+      width: 48px;
+      background: linear-gradient(to right, var(--accent), var(--accent2));
+      animation: pulseLine 2s ease-in-out infinite;
+    }
+    .arrow-head-h {
+      width: 0;
+      height: 0;
+      border-top: 7px solid transparent;
+      border-bottom: 7px solid transparent;
+      border-left: 10px solid var(--accent2);
+    }
+
+    /* Two-way arrow hint */
+    .arrow-both .arrow-line-v::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-bottom: 10px solid var(--accent);
+    }
+
+    @keyframes pulseLine {
+      0%, 100% { opacity: 0.7; }
+      50% { opacity: 1; }
+    }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Step numbers */
+    .step-bubble {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--bg);
+    }
+
+    /* Streaming badge */
+    .streaming-badge {
+      position: absolute;
+      top: -12px;
+      right: 10px;
+      background: linear-gradient(135deg, var(--accent3), var(--accent2));
+      color: #0a0e1a;
+      font-size: 0.56rem;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 999px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      animation: shimmer 1.8s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    /* ── LEGEND ── */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    /* ══════════════════════════════════════
+       SERVICES GRID
+    ══════════════════════════════════════ */
+    .services-section { margin-bottom: 70px; }
+    .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .service-card {
+      padding: 22px;
+      border-radius: var(--radius);
+      border: 1.5px solid var(--border);
+      background: rgba(17,24,39,0.7);
+      backdrop-filter: blur(10px);
+      transition: transform 0.25s, box-shadow 0.25s;
+      position: relative;
+      overflow: hidden;
+    }
+    .service-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 80% 80% at 10% 10%, rgba(99,102,241,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .service-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    }
+    .service-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .service-icon {
+      font-size: 2rem;
+      flex-shrink: 0;
+    }
+    .service-name {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .service-role {
+      font-size: 0.73rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .service-detail {
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 14px;
+    }
+    .free-tier {
+      font-size: 0.75rem;
+      font-family: 'Fira Code', monospace;
+      background: rgba(16,185,129,0.12);
+      border: 1px solid rgba(16,185,129,0.25);
+      color: #6ee7b7;
+      padding: 6px 10px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      line-height: 1.5;
+    }
+    .free-tier .label { font-weight: 700; color: var(--green); }
+    .get-key-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: 8px;
+      background: rgba(99,102,241,0.15);
+      border: 1px solid rgba(99,102,241,0.3);
+      color: #a5b4fc;
+      text-decoration: none;
+      transition: background 0.2s, border-color 0.2s;
+      cursor: pointer;
+    }
+    .get-key-btn:hover {
+      background: rgba(99,102,241,0.28);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    /* ══════════════════════════════════════
+       SETUP STEPS – ACCORDION
+    ══════════════════════════════════════ */
+    .setup-section { margin-bottom: 70px; }
+    .steps-list { display: flex; flex-direction: column; gap: 14px; }
+
+    /* Accordion wrapper */
+    .step-item {
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: rgba(17,24,39,0.65);
+      backdrop-filter: blur(8px);
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .step-item:hover { border-color: rgba(99,102,241,0.5); }
+
+    /* Clickable header row */
+    .step-header {
+      display: grid;
+      grid-template-columns: 50px 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 18px 22px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-num {
+      width: 46px;
+      height: 46px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent3));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .step-header-text h3 {
+      font-size: 0.97rem;
+      font-weight: 700;
+      margin-bottom: 3px;
+    }
+    .step-header-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .step-chevron {
+      font-size: 1.1rem;
+      color: var(--muted);
+      transition: transform 0.3s;
+      flex-shrink: 0;
+    }
+    .step-item.open .step-chevron { transform: rotate(180deg); }
+
+    /* Collapsible body */
+    .step-body {
+      padding: 0 22px 0 88px;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.45s ease, padding 0.3s;
+    }
+    .step-item.open .step-body {
+      max-height: 9999px;
+      padding-bottom: 24px;
+    }
+
+    /* Sub-step list */
+    .substep-list {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding-top: 8px;
+    }
+    .substep {
+      border-left: 2px solid rgba(99,102,241,0.3);
+      padding-left: 16px;
+    }
+    .substep-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .substep-num {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(99,102,241,0.25);
+      border: 1px solid rgba(99,102,241,0.4);
+      color: #a5b4fc;
+      font-size: 0.65rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .substep p {
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.65;
+      margin-bottom: 8px;
+    }
+    .substep p:last-child { margin-bottom: 0; }
+
+    /* Code block (terminal) */
+    .cmd-block {
+      background: #0d1117;
+      border: 1px solid rgba(99,102,241,0.25);
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: #c9d1d9;
+      overflow-x: auto;
+      margin: 8px 0;
+      line-height: 1.8;
+      white-space: pre;
+    }
+    .cmd-block .prompt { color: #6ee7b7; }
+    .cmd-block .comment-c { color: #6b7280; font-style: italic; }
+    .cmd-block .hl { color: #fde68a; }
+    .cmd-block .val { color: #a5b4fc; }
+
+    /* Path breadcrumb */
+    .nav-path {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(34,211,238,0.08);
+      border: 1px solid rgba(34,211,238,0.2);
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent2);
+      margin: 6px 0;
+    }
+    .nav-path span { color: var(--muted); }
+
+    /* Inline code */
+    .ic {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.78rem;
+      background: rgba(99,102,241,0.12);
+      border: 1px solid rgba(99,102,241,0.2);
+      color: #a5b4fc;
+      padding: 1px 6px;
+      border-radius: 5px;
+    }
+
+    /* Callout boxes */
+    .callout {
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.8rem;
+      line-height: 1.6;
+      margin: 10px 0;
+    }
+    .callout-tip {
+      background: rgba(16,185,129,0.08);
+      border: 1px solid rgba(16,185,129,0.25);
+      color: #6ee7b7;
+    }
+    .callout-warn {
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.25);
+      color: #fde68a;
+    }
+    .callout-info {
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.25);
+      color: #a5b4fc;
+    }
+    .callout strong { font-weight: 700; }
+
+    /* Tags */
+    .step-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .step-tag {
+      font-size: 0.67rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .t-free  { background: rgba(16,185,129,0.15); color: var(--green); }
+    .t-env   { background: rgba(245,158,11,0.15); color: var(--yellow); }
+    .t-code  { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+    .t-infra { background: rgba(34,211,238,0.15); color: var(--accent2); }
+
+    /* ══════════════════════════════════════
+       ENV VARS TABLE
+    ══════════════════════════════════════ */
+    .env-section { margin-bottom: 70px; }
+    .env-block {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.8rem;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      line-height: 2;
+      overflow-x: auto;
+    }
+    .env-block .comment { color: #6b7280; }
+    .env-block .key { color: #67e8f9; }
+    .env-block .eq { color: #94a3b8; }
+    .env-block .val { color: #fde68a; }
+
+    /* ══════════════════════════════════════
+       TECH STACK PILLS
+    ══════════════════════════════════════ */
+    .stack-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .pill {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 5px 13px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* ══════════════════════════════════════
+       FOOTER
+    ══════════════════════════════════════ */
+    .footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.78rem;
+      padding-top: 30px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 640px) {
+      .flow-row { flex-direction: column; }
+      .arrow-h { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── HEADER ── -->
+  <header class="header">
+    <div class="badge">🔬 Proof of Concept</div>
+    <h1>AI Call Bot Architecture</h1>
+    <p class="subtitle">End-to-end flow using 100% free-tier services · Setup guide &amp; key locations included</p>
+    <div class="stack-pills" style="justify-content:center;margin-top:16px;">
+      <span class="pill">📞 Twilio (Free Trial)</span>
+      <span class="pill">🎙️ Deepgram STT</span>
+      <span class="pill">🤖 Google Gemini AI</span>
+      <span class="pill">🔊 ElevenLabs TTS</span>
+      <span class="pill">⚡ Node.js / Express</span>
+      <span class="pill">🌐 ngrok Tunnel</span>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════
+       SECTION 1 – FLOW DIAGRAM
+  ══════════════════════════════════════════ -->
+  <section class="flow-section">
+    <h2 class="section-title">🔄 End-to-End Call Flow</h2>
+    <div class="card">
+      <div class="flow-diagram">
+
+        <!-- ROW 1: Caller -->
+        <div class="flow-row">
+          <div class="node caller" style="animation-delay:0s">
+            <div class="step-bubble">1</div>
+            <span class="node-icon">🧑‍💼</span>
+            <div class="node-label">Initiator</div>
+            <div class="node-title">Caller / User</div>
+            <span class="node-service tag-green">PSTN / Mobile</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v arrow-both">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">Inbound voice call</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 2: Twilio -->
+        <div class="flow-row">
+          <div class="node twilio" style="animation-delay:0.1s">
+            <div class="step-bubble">2</div>
+            <span class="node-icon">📞</span>
+            <div class="node-label">Telephony Gateway</div>
+            <div class="node-title">Twilio Voice</div>
+            <span class="node-service tag-red">Free Trial $15</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">TwiML webhook POST</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 3: Backend -->
+        <div class="flow-row">
+          <div class="node backend" style="animation-delay:0.2s">
+            <div class="step-bubble">3</div>
+            <span class="node-icon">⚙️</span>
+            <div class="node-label">Orchestrator</div>
+            <div class="node-title">Node.js Backend</div>
+            <span class="node-service tag-indigo">Express + WebSocket</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">Raw audio stream (μ-law)</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 4: STT -->
+        <div class="flow-row">
+          <div class="node stt" style="animation-delay:0.3s">
+            <div class="step-bubble">4</div>
+            <span class="node-icon">🎙️</span>
+            <div class="node-label">Speech → Text</div>
+            <div class="node-title">Deepgram STT</div>
+            <span class="node-service tag-cyan">Free 200 hr/mo</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">Transcript (JSON)</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 5: AI -->
+        <div class="flow-row">
+          <div class="node ai" style="animation-delay:0.4s">
+            <div class="step-bubble">5</div>
+            <div class="streaming-badge">⚡ Streaming</div>
+            <span class="node-icon">🤖</span>
+            <div class="node-label">AI Reasoning</div>
+            <div class="node-title">Gemini 2.0 Flash</div>
+            <span class="node-service tag-purple">Free 15 RPM</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">Streamed text chunks (SSE)</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 6: TTS -->
+        <div class="flow-row">
+          <div class="node tts" style="animation-delay:0.5s">
+            <div class="step-bubble">6</div>
+            <span class="node-icon">🔊</span>
+            <div class="node-label">Text → Speech</div>
+            <div class="node-title">ElevenLabs TTS</div>
+            <span class="node-service tag-yellow">Free 10k chars/mo</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">Audio stream (MP3/μ-law)</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 7: Back to Twilio -->
+        <div class="flow-row">
+          <div class="node twilio" style="animation-delay:0.6s">
+            <div class="step-bubble">7</div>
+            <span class="node-icon">📡</span>
+            <div class="node-label">Audio Playback</div>
+            <div class="node-title">Twilio Media Stream</div>
+            <span class="node-service tag-red">TwiML &lt;Stream&gt;</span>
+          </div>
+        </div>
+
+        <!-- Arrow Down -->
+        <div class="arrow-v arrow-both">
+          <div class="arrow-line-v"></div>
+          <div class="arrow-label">Voice response to caller</div>
+          <div class="arrow-line-v"></div>
+          <div class="arrow-head-v"></div>
+        </div>
+
+        <!-- ROW 8: Caller again -->
+        <div class="flow-row">
+          <div class="node caller" style="animation-delay:0.7s">
+            <div class="step-bubble">8</div>
+            <span class="node-icon">👂</span>
+            <div class="node-label">Hears AI Response</div>
+            <div class="node-title">Caller</div>
+            <span class="node-service tag-green">Loop continues</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Legend -->
+      <div class="legend" style="padding-bottom:24px;">
+        <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Caller / User</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Twilio Telephony</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Node.js Backend</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#22d3ee"></div>Deepgram STT</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Gemini AI (Streaming)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>ElevenLabs TTS</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════
+       SECTION 2 – FREE SERVICES
+  ══════════════════════════════════════════ -->
+  <section class="services-section">
+    <h2 class="section-title">🆓 Free Services &amp; Where to Get Keys</h2>
+    <div class="services-grid">
+
+      <!-- Twilio -->
+      <div class="service-card">
+        <div class="service-header">
+          <span class="service-icon">📞</span>
+          <div>
+            <div class="service-name">Twilio Voice</div>
+            <div class="service-role">Telephony · Call Routing · Media Streams</div>
+          </div>
+        </div>
+        <p class="service-detail">
+          Handles PSTN calls, provides a phone number, streams raw audio via WebSocket using <strong>Media Streams</strong>, and plays TTS audio back to callers via TwiML.
+        </p>
+        <div class="free-tier">
+          <span class="label">Free Trial:</span> $15 credit on signup (no card required initially).<br/>
+          Buys ~1,000 min of voice calls. Trial number included.
+        </div>
+        <a class="get-key-btn" href="https://www.twilio.com/try-twilio" target="_blank">🔑 Get Free Trial → twilio.com/try-twilio</a>
+        <div class="step-tags" style="margin-top:10px;">
+          <span class="step-tag t-env">TWILIO_ACCOUNT_SID</span>
+          <span class="step-tag t-env">TWILIO_AUTH_TOKEN</span>
+          <span class="step-tag t-env">TWILIO_PHONE_NUMBER</span>
+        </div>
+      </div>
+
+      <!-- Deepgram -->
+      <div class="service-card">
+        <div class="service-header">
+          <span class="service-icon">🎙️</span>
+          <div>
+            <div class="service-name">Deepgram</div>
+            <div class="service-role">Speech-to-Text · Real-time Streaming</div>
+          </div>
+        </div>
+        <p class="service-detail">
+          Highly accurate real-time STT via WebSocket. Supports <code>nova-2</code> model with phone-quality audio, interim results, and punctuation. Perfect for live call processing.
+        </p>
+        <div class="free-tier">
+          <span class="label">Free Tier:</span> $200 credit on signup (~200 hours of audio).<br/>
+          No credit card required for initial API key.
+        </div>
+        <a class="get-key-btn" href="https://console.deepgram.com/signup" target="_blank">🔑 Get Key → console.deepgram.com/signup</a>
+        <div class="step-tags" style="margin-top:10px;">
+          <span class="step-tag t-env">DEEPGRAM_API_KEY</span>
+        </div>
+      </div>
+
+      <!-- Gemini -->
+      <div class="service-card">
+        <div class="service-header">
+          <span class="service-icon">🤖</span>
+          <div>
+            <div class="service-name">Google Gemini API</div>
+            <div class="service-role">AI Reasoning · Streaming Responses</div>
+          </div>
+        </div>
+        <p class="service-detail">
+          Use <strong>Gemini 2.0 Flash</strong> for fast, streaming text responses. The Node.js SDK supports <code>generateContentStream()</code> which streams tokens back as they're generated — ideal for low-latency TTS.
+        </p>
+        <div class="free-tier">
+          <span class="label">Free Tier:</span> 15 RPM · 1M TPM · 1500 RPD with gemini-2.0-flash.<br/>
+          No billing required for free tier.
+        </div>
+        <a class="get-key-btn" href="https://aistudio.google.com/app/apikey" target="_blank">🔑 Get Key → aistudio.google.com/app/apikey</a>
+        <div class="step-tags" style="margin-top:10px;">
+          <span class="step-tag t-env">GEMINI_API_KEY</span>
+        </div>
+      </div>
+
+      <!-- ElevenLabs -->
+      <div class="service-card">
+        <div class="service-header">
+          <span class="service-icon">🔊</span>
+          <div>
+            <div class="service-name">ElevenLabs</div>
+            <div class="service-role">Text-to-Speech · Streaming Audio</div>
+          </div>
+        </div>
+        <p class="service-detail">
+          Natural-sounding TTS with streaming support. Use the <strong>Streaming API</strong> to send partial Gemini output and receive audio chunks in real-time before the full response is ready.
+        </p>
+        <div class="free-tier">
+          <span class="label">Free Tier:</span> 10,000 characters/month.<br/>
+          Supports streaming audio output via HTTP chunked transfer.
+        </div>
+        <a class="get-key-btn" href="https://elevenlabs.io/sign-up" target="_blank">🔑 Get Key → elevenlabs.io/sign-up</a>
+        <div class="step-tags" style="margin-top:10px;">
+          <span class="step-tag t-env">ELEVENLABS_API_KEY</span>
+          <span class="step-tag t-env">ELEVENLABS_VOICE_ID</span>
+        </div>
+      </div>
+
+      <!-- ngrok -->
+      <div class="service-card">
+        <div class="service-header">
+          <span class="service-icon">🌐</span>
+          <div>
+            <div class="service-name">ngrok</div>
+            <div class="service-role">Tunneling · Localhost → Public HTTPS</div>
+          </div>
+        </div>
+        <p class="service-detail">
+          Exposes your local Express server to Twilio via a public HTTPS URL. Required since Twilio webhooks cannot reach <code>localhost</code>. Supports WebSocket tunneling for Media Streams.
+        </p>
+        <div class="free-tier">
+          <span class="label">Free Tier:</span> 1 tunnel, random subdomain, unlimited bandwidth.<br/>
+          Permanent domain available with free account.
+        </div>
+        <a class="get-key-btn" href="https://ngrok.com/signup" target="_blank">🔑 Get Key → ngrok.com/signup</a>
+        <div class="step-tags" style="margin-top:10px;">
+          <span class="step-tag t-env">NGROK_AUTHTOKEN</span>
+        </div>
+      </div>
+
+      <!-- Node.js -->
+      <div class="service-card">
+        <div class="service-header">
+          <span class="service-icon">⚡</span>
+          <div>
+            <div class="service-name">Node.js + Express</div>
+            <div class="service-role">Backend Orchestrator</div>
+          </div>
+        </div>
+        <p class="service-detail">
+          The central hub: receives Twilio webhooks, manages WebSocket connections for audio streaming, pipes audio to Deepgram, sends transcript to Gemini, streams TTS audio back to Twilio.
+        </p>
+        <div class="free-tier">
+          <span class="label">Free:</span> Open-source runtime. Use <code>ws</code> library for WebSocket + <code>@google/generative-ai</code> SDK.
+        </div>
+        <a class="get-key-btn" href="https://nodejs.org" target="_blank">⬇️ Download → nodejs.org</a>
+        <div class="step-tags" style="margin-top:10px;">
+          <span class="step-tag t-code">express</span>
+          <span class="step-tag t-code">ws</span>
+          <span class="step-tag t-code">@google/generative-ai</span>
+          <span class="step-tag t-code">@deepgram/sdk</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════
+       SECTION 3 – SETUP STEPS (DETAILED)
+  ══════════════════════════════════════════ -->
+  <section class="setup-section">
+    <h2 class="section-title">🚀 In-Depth Setup Steps — Complete Beginner Guide</h2>
+    <div class="callout callout-info" style="margin-bottom:20px;">
+      <strong>👆 Click any step to expand it.</strong> Every step has exact terminal commands, console navigation paths, and what to copy where.
+    </div>
+    <div class="steps-list">
+
+      <!-- ───────────── STEP 1 ───────────── -->
+      <div class="step-item" id="s1">
+        <div class="step-header" onclick="toggleStep('s1')">
+          <div class="step-num">1</div>
+          <div class="step-header-text">
+            <h3>📦 Install Node.js on Your Computer</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-infra">Prerequisites</span>
+              <span class="step-tag t-free">Free</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Download Node.js</div>
+              <p>Go to <strong>nodejs.org</strong> and download the <strong>LTS version</strong> (Long-Term Support — the left green button). This installs both <span class="ic">node</span> and <span class="ic">npm</span> (Node Package Manager).</p>
+              <div class="callout callout-tip">💡 <strong>Tip:</strong> Choose the "LTS" version, not "Current". It's more stable for projects.</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Verify Installation</div>
+              <p>Open a terminal (Windows: press <strong>Win + R</strong>, type <span class="ic">cmd</span>, press Enter) and run:</p>
+              <div class="cmd-block"><span class="prompt">$</span> node --version
+<span class="comment-c"># Should print something like: v22.13.0</span>
+<span class="prompt">$</span> npm --version
+<span class="comment-c"># Should print something like: 10.9.0</span></div>
+              <div class="callout callout-warn">⚠️ If you get "command not found", restart your terminal or reinstall Node.js.</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Open Your Project Folder</div>
+              <p>Your project folder is already at <span class="ic">C:\Users\Aaman\OneDrive\Desktop\new-call-bot</span>. Open a terminal there:</p>
+              <div class="cmd-block"><span class="prompt">$</span> cd "C:\Users\Aaman\OneDrive\Desktop\new-call-bot"</div>
+              <p>Or in VS Code: open the folder, then press <span class="ic">Ctrl + `</span> (backtick) to open the integrated terminal.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 2 ───────────── -->
+      <div class="step-item" id="s2">
+        <div class="step-header" onclick="toggleStep('s2')">
+          <div class="step-num">2</div>
+          <div class="step-header-text">
+            <h3>🔑 Sign Up for All Free Services &amp; Get API Keys</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-free">All Free</span>
+              <span class="step-tag t-env">5 API Keys</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Twilio — Phone Number &amp; Call Handling</div>
+              <p>1. Go to <a href="https://www.twilio.com/try-twilio" target="_blank" style="color:var(--accent2)">twilio.com/try-twilio</a> → sign up with your email.<br/>
+              2. Verify your phone number (Twilio calls or texts you a code).<br/>
+              3. Once logged in, you land on the <strong>Console Dashboard</strong>.<br/>
+              4. Look for the <strong>Account Info</strong> box on the right side of the dashboard.</p>
+              <div class="nav-path">Console Dashboard <span>→</span> Account Info panel</div>
+              <p>Copy these two values into your <span class="ic">.env</span> file:</p>
+              <div class="cmd-block"><span class="hl">TWILIO_ACCOUNT_SID</span> = <span class="val">ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>
+<span class="hl">TWILIO_AUTH_TOKEN</span>  = <span class="val">your_auth_token_here</span></div>
+              <div class="callout callout-warn">⚠️ <strong>Never share your Auth Token.</strong> Treat it like a password.</div>
+            </div>
+
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Twilio — Get a Free Phone Number</div>
+              <p>1. In the left sidebar go to:</p>
+              <div class="nav-path">Phone Numbers <span>→</span> Manage <span>→</span> Buy a Number</div>
+              <p>2. Search for any number (choose your country). Make sure the <strong>Voice</strong> checkbox is ticked.<br/>
+              3. Click <strong>Buy</strong> ($1 is deducted from your $15 credit — you won't be charged externally).<br/>
+              4. Copy the number in format <span class="ic">+12025551234</span> into your <span class="ic">.env</span>:</p>
+              <div class="cmd-block"><span class="hl">TWILIO_PHONE_NUMBER</span> = <span class="val">+12025551234</span></div>
+            </div>
+
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Deepgram — Speech-to-Text API Key</div>
+              <p>1. Go to <a href="https://console.deepgram.com/signup" target="_blank" style="color:var(--accent2)">console.deepgram.com/signup</a> → sign up (no credit card needed).<br/>
+              2. After logging in, you'll be on the Dashboard. Click:</p>
+              <div class="nav-path">API Keys <span>→</span> Create a New API Key</div>
+              <p>3. Give it a name like <span class="ic">call-bot</span>, set permissions to <strong>Member</strong>, click <strong>Create Key</strong>.<br/>
+              4. <strong>Copy the key immediately</strong> — it's only shown once!</p>
+              <div class="cmd-block"><span class="hl">DEEPGRAM_API_KEY</span> = <span class="val">your_deepgram_key_here</span></div>
+              <div class="callout callout-tip">💡 You get $200 free credit (~200 hours of audio transcription). More than enough for a POC.</div>
+            </div>
+
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">D</span> Google Gemini — AI API Key</div>
+              <p>1. Go to <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent2)">aistudio.google.com/app/apikey</a> → sign in with your Google account.<br/>
+              2. Click <strong>"Create API key"</strong> → choose <strong>"Create API key in new project"</strong>.<br/>
+              3. Copy the key that appears.</p>
+              <div class="cmd-block"><span class="hl">GEMINI_API_KEY</span> = <span class="val">AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXX</span>
+<span class="hl">GEMINI_MODEL</span>   = <span class="val">gemini-2.0-flash</span></div>
+              <div class="callout callout-tip">💡 Free tier: 15 requests/minute, 1 million tokens/minute, 1,500 requests/day. Zero cost, zero credit card.</div>
+            </div>
+
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">E</span> ElevenLabs — Text-to-Speech Key &amp; Voice ID</div>
+              <p>1. Go to <a href="https://elevenlabs.io/sign-up" target="_blank" style="color:var(--accent2)">elevenlabs.io/sign-up</a> → create a free account.<br/>
+              2. After login, click your profile icon (top-right) → <strong>Profile + API Key</strong>.<br/>
+              3. Copy the API key shown.</p>
+              <div class="cmd-block"><span class="hl">ELEVENLABS_API_KEY</span> = <span class="val">your_elevenlabs_key</span></div>
+              <p>4. To get a Voice ID: go to <strong>Voices</strong> in the sidebar → click any voice → click the <strong>&lt;/&gt;</strong> icon → copy the Voice ID.</p>
+              <div class="cmd-block"><span class="hl">ELEVENLABS_VOICE_ID</span> = <span class="val">21m00Tcm4TlvDq8ikWAM</span>  <span class="comment-c"># "Rachel" - default free voice</span></div>
+              <div class="callout callout-tip">💡 Free tier = 10,000 characters/month. A typical 5-min call uses ~500 chars — that's 20 full calls per month free.</div>
+            </div>
+
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">F</span> ngrok — Tunnel Auth Token</div>
+              <p>1. Go to <a href="https://ngrok.com/signup" target="_blank" style="color:var(--accent2)">ngrok.com/signup</a> → create a free account.<br/>
+              2. After login, you're on the Dashboard. Go to:</p>
+              <div class="nav-path">Your Authtoken <span>→</span> Copy</div>
+              <div class="cmd-block"><span class="hl">NGROK_AUTHTOKEN</span> = <span class="val">2abc123XXXXXXXXXXXXXXXXXXXXXXXX</span></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 3 ───────────── -->
+      <div class="step-item" id="s3">
+        <div class="step-header" onclick="toggleStep('s3')">
+          <div class="step-num">3</div>
+          <div class="step-header-text">
+            <h3>🛠️ Initialize Your Node.js Project</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-code">npm</span>
+              <span class="step-tag t-infra">Project Scaffold</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Initialize the Project</div>
+              <p>In your terminal, inside the project folder, run:</p>
+              <div class="cmd-block"><span class="prompt">$</span> npm init -y
+<span class="comment-c"># This creates a package.json file — the project's config file</span></div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Install All Dependencies</div>
+              <p>Run this single command to install everything you need:</p>
+              <div class="cmd-block"><span class="prompt">$</span> npm install express ws dotenv @google/generative-ai @deepgram/sdk axios</div>
+              <p>What each package does:</p>
+              <div class="cmd-block"><span class="val">express</span>            <span class="comment-c">→ Web server (handles HTTP requests from Twilio)</span>
+<span class="val">ws</span>                 <span class="comment-c">→ WebSocket library (for Twilio audio stream)</span>
+<span class="val">dotenv</span>             <span class="comment-c">→ Reads your .env file into process.env</span>
+<span class="val">@google/generative-ai</span> <span class="comment-c">→ Gemini AI SDK (streaming responses)</span>
+<span class="val">@deepgram/sdk</span>      <span class="comment-c">→ Deepgram SDK (speech-to-text)</span>
+<span class="val">axios</span>              <span class="comment-c">→ HTTP client (for ElevenLabs TTS API calls)</span></div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Create the .env File</div>
+              <p>In your project folder, create a file called exactly <span class="ic">.env</span> (no extension). Paste all your keys:</p>
+              <div class="cmd-block"><span class="comment-c"># .env — DO NOT commit this file to GitHub!</span>
+<span class="hl">PORT</span>=<span class="val">3000</span>
+<span class="hl">TWILIO_ACCOUNT_SID</span>=<span class="val">ACxxx...</span>
+<span class="hl">TWILIO_AUTH_TOKEN</span>=<span class="val">your_token</span>
+<span class="hl">TWILIO_PHONE_NUMBER</span>=<span class="val">+12025551234</span>
+<span class="hl">DEEPGRAM_API_KEY</span>=<span class="val">your_deepgram_key</span>
+<span class="hl">GEMINI_API_KEY</span>=<span class="val">AIzaSy...</span>
+<span class="hl">GEMINI_MODEL</span>=<span class="val">gemini-2.0-flash</span>
+<span class="hl">ELEVENLABS_API_KEY</span>=<span class="val">your_elevenlabs_key</span>
+<span class="hl">ELEVENLABS_VOICE_ID</span>=<span class="val">21m00Tcm4TlvDq8ikWAM</span>
+<span class="hl">PUBLIC_URL</span>=<span class="val">https://your-ngrok-url.ngrok-free.app</span></div>
+              <div class="callout callout-warn">⚠️ Add <span class="ic">.env</span> to your <span class="ic">.gitignore</span> file if using Git. Never push API keys to GitHub!</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">D</span> Create a Basic index.js</div>
+              <p>Create <span class="ic">index.js</span> in your project folder. Start with this minimal boilerplate:</p>
+              <div class="cmd-block">require('dotenv').config();
+const express = require('express');
+const app     = express();
+app.use(express.urlencoded({ extended: false }));
+
+app.get('/', (req, res) => res.send('AI Call Bot is running!'));
+
+app.listen(process.env.PORT, () => {
+  console.log(`Server running on port ${process.env.PORT}`);
+});</div>
+              <p>Test it: run <span class="ic">node index.js</span> and visit <span class="ic">http://localhost:3000</span> — you should see the message.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 4 ───────────── -->
+      <div class="step-item" id="s4">
+        <div class="step-header" onclick="toggleStep('s4')">
+          <div class="step-num">4</div>
+          <div class="step-header-text">
+            <h3>🌐 Install &amp; Start ngrok (Public HTTPS Tunnel)</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-infra">Tunnel</span>
+              <span class="step-tag t-free">Free</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Why Do We Need ngrok?</div>
+              <p>Twilio needs to send webhook requests (HTTP calls) to your server when someone calls your number. But your server runs on <span class="ic">localhost:3000</span> which is only accessible from your own computer — not from the internet. ngrok creates a <strong>public HTTPS URL</strong> that forwards traffic to your local server.</p>
+              <div class="callout callout-info">📌 Think of ngrok as a door: the internet → ngrok URL → your computer's port 3000.</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Install ngrok</div>
+              <p>Option 1 — via npm (easiest if you already have Node):</p>
+              <div class="cmd-block"><span class="prompt">$</span> npm install -g ngrok</div>
+              <p>Option 2 — Download the binary from <a href="https://ngrok.com/download" target="_blank" style="color:var(--accent2)">ngrok.com/download</a> and unzip it. Place <span class="ic">ngrok.exe</span> somewhere in your PATH or your project folder.</p>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Authenticate ngrok with Your Token</div>
+              <p>Run this once (gets saved to a config file permanently):</p>
+              <div class="cmd-block"><span class="prompt">$</span> ngrok config add-authtoken <span class="val">YOUR_NGROK_AUTHTOKEN</span>
+<span class="comment-c"># Replace YOUR_NGROK_AUTHTOKEN with the token from ngrok dashboard</span></div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">D</span> Start the Tunnel</div>
+              <p>Make sure your Node server is running in one terminal. Open a <strong>second terminal</strong> and run:</p>
+              <div class="cmd-block"><span class="prompt">$</span> ngrok http 3000</div>
+              <p>You'll see output like this:</p>
+              <div class="cmd-block">Forwarding  <span class="hl">https://a1b2-123-456.ngrok-free.app</span> -> http://localhost:3000</div>
+              <p>Copy that <span class="ic">https://...</span> URL. This is your <strong>PUBLIC_URL</strong> — paste it in your <span class="ic">.env</span> file.</p>
+              <div class="callout callout-warn">⚠️ The URL changes every time you restart ngrok (free plan). You must update the Twilio webhook URL each time. Keep ngrok running while testing.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 5 ───────────── -->
+      <div class="step-item" id="s5">
+        <div class="step-header" onclick="toggleStep('s5')">
+          <div class="step-num">5</div>
+          <div class="step-header-text">
+            <h3>📞 Configure Twilio to Call Your Server</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-infra">Twilio Console</span>
+              <span class="step-tag t-code">Webhook</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Navigate to Your Phone Number</div>
+              <p>In the Twilio Console, go to:</p>
+              <div class="nav-path">Phone Numbers <span>→</span> Manage <span>→</span> Active Numbers</div>
+              <p>Click on your purchased phone number to open its settings.</p>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Set the Voice Webhook</div>
+              <p>Scroll down to the <strong>"Voice Configuration"</strong> section. You'll see a field labeled <strong>"A call comes in"</strong>. Set it to:</p>
+              <div class="cmd-block"><span class="comment-c">Method: HTTP POST (select from dropdown)</span>
+<span class="hl">URL:</span> <span class="val">https://YOUR-NGROK-URL.ngrok-free.app/incoming-call</span></div>
+              <p>Click <strong>Save Configuration</strong> at the bottom of the page.</p>
+              <div class="callout callout-info">📌 Every time ngrok restarts and gives you a new URL, you must come back here and update this URL.</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Add the /incoming-call Route in Your Server</div>
+              <p>This route receives Twilio's POST request when someone calls your number. It must respond with <strong>TwiML</strong> (Twilio Markup Language — an XML format) that tells Twilio to open a Media Stream WebSocket to your server:</p>
+              <div class="cmd-block">app.post('/incoming-call', (req, res) => {
+  const twiml = `&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+  &lt;Response&gt;
+    &lt;Connect&gt;
+      &lt;Stream url="wss://${process.env.PUBLIC_URL.replace('https://','')}/media-stream" /&gt;
+    &lt;/Connect&gt;
+  &lt;/Response&gt;`;
+
+  res.type('text/xml');
+  res.send(twiml);
+});</div>
+              <div class="callout callout-tip">💡 The <span class="ic">&lt;Stream&gt;</span> tag is what tells Twilio to send raw audio bytes to your WebSocket endpoint in real-time.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 6 ───────────── -->
+      <div class="step-item" id="s6">
+        <div class="step-header" onclick="toggleStep('s6')">
+          <div class="step-num">6</div>
+          <div class="step-header-text">
+            <h3>🔌 Handle Twilio Audio Stream via WebSocket</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-code">WebSocket</span>
+              <span class="step-tag t-code">Audio Decoding</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> What Twilio Sends You</div>
+              <p>Once the call connects, Twilio opens a WebSocket connection to your <span class="ic">/media-stream</span> endpoint and sends JSON messages. The important one is the <span class="ic">media</span> event which contains base64-encoded audio in <strong>µ-law 8kHz format</strong> (phone audio format).</p>
+              <div class="cmd-block"><span class="comment-c">// Example message from Twilio:</span>
+{
+  "event": <span class="val">"media"</span>,
+  "media": {
+    "payload": <span class="val">"base64encodedaudiohere..."</span>,
+    "track": <span class="val">"inbound"</span>
+  }
+}</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Set Up the WebSocket Server</div>
+              <p>Add this to your <span class="ic">index.js</span> after creating the Express app. The <span class="ic">ws</span> library attaches to the same HTTP server so both HTTP and WebSocket run on port 3000:</p>
+              <div class="cmd-block">const http = require('http');
+const WebSocket = require('ws');
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', (ws, req) => {
+  if (req.url === '/media-stream') {
+    handleMediaStream(ws);
+  }
+});
+
+server.listen(process.env.PORT, () => {
+  console.log(`Server listening on port ${process.env.PORT}`);
+});</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Process Incoming Audio Chunks</div>
+              <p>In the <span class="ic">handleMediaStream</span> function, listen for messages and extract audio:</p>
+              <div class="cmd-block">function handleMediaStream(ws) {
+  ws.on('message', (data) => {
+    const msg = JSON.parse(data);
+
+    if (msg.event === 'media') {
+      <span class="comment-c">// Decode base64 → raw audio buffer</span>
+      const audioBuffer = Buffer.from(msg.media.payload, 'base64');
+      <span class="comment-c">// Send to Deepgram (covered in next step)</span>
+      sendToDeepgram(audioBuffer);
+    }
+
+    if (msg.event === 'start') {
+      console.log('Call started! Stream SID:', msg.start.streamSid);
+    }
+  });
+}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 7 ───────────── -->
+      <div class="step-item" id="s7">
+        <div class="step-header" onclick="toggleStep('s7')">
+          <div class="step-num">7</div>
+          <div class="step-header-text">
+            <h3>🎙️ Connect Deepgram for Real-Time Speech-to-Text</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-code">STT</span>
+              <span class="step-tag t-code">WebSocket</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> What Deepgram Does</div>
+              <p>Deepgram opens a persistent WebSocket connection. You feed it raw audio bytes and it returns <strong>JSON transcripts in real-time</strong> — as the person is still speaking (interim results) or after they finish a sentence (final results). You use <strong>final results</strong> to trigger the AI.</p>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Initialize Deepgram Connection</div>
+              <div class="cmd-block">const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
+
+const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+
+function createDeepgramSession(onTranscript) {
+  const connection = deepgram.listen.live({
+    model: <span class="val">'nova-2'</span>,       <span class="comment-c">// Best accuracy model</span>
+    language: <span class="val">'en-US'</span>,
+    smart_format: true,      <span class="comment-c">// Adds punctuation</span>
+    interim_results: false,  <span class="comment-c">// Only fire on sentence-end</span>
+    encoding: <span class="val">'mulaw'</span>,      <span class="comment-c">// Twilio's audio format</span>
+    sample_rate: 8000,       <span class="comment-c">// Twilio's sample rate</span>
+  });
+
+  connection.on(LiveTranscriptionEvents.Transcript, (data) => {
+    const transcript = data.channel.alternatives[0].transcript;
+    if (transcript && data.is_final) {
+      onTranscript(transcript); <span class="comment-c">// Pass to Gemini</span>
+    }
+  });
+
+  return connection;
+}</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Send Audio to Deepgram</div>
+              <p>Update your <span class="ic">handleMediaStream</span> to create a Deepgram session and feed it audio:</p>
+              <div class="cmd-block">function handleMediaStream(ws) {
+  const dgSession = createDeepgramSession((transcript) => {
+    console.log('User said:', transcript);
+    getAIResponse(transcript, ws); <span class="comment-c">// Step 8</span>
+  });
+
+  ws.on('message', (data) => {
+    const msg = JSON.parse(data);
+    if (msg.event === 'media') {
+      const audioBuffer = Buffer.from(msg.media.payload, 'base64');
+      dgSession.send(audioBuffer); <span class="comment-c">// Stream to Deepgram</span>
+    }
+  });
+
+  ws.on('close', () => dgSession.finish());
+}</div>
+              <div class="callout callout-tip">💡 Deepgram handles silence detection automatically. It will only send a "final" transcript when the speaker pauses for ~0.5 seconds.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 8 ───────────── -->
+      <div class="step-item" id="s8">
+        <div class="step-header" onclick="toggleStep('s8')">
+          <div class="step-num">8</div>
+          <div class="step-header-text">
+            <h3>🤖 Generate AI Response with Gemini (Streaming)</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-code">Gemini SDK</span>
+              <span class="step-tag t-code">Streaming</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Why Streaming?</div>
+              <p>Instead of waiting for Gemini to finish the full response (could be 3–5 seconds), streaming lets you receive the text <strong>token by token</strong>. You can start sending the first sentence to TTS immediately, making the bot feel much faster and more natural.</p>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Initialize the Gemini Client</div>
+              <div class="cmd-block">const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({
+  model: process.env.GEMINI_MODEL,
+  systemInstruction: <span class="val">'You are a helpful phone call assistant. Keep responses short and conversational — 1-2 sentences max. No markdown or lists.'</span>
+});</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Stream Gemini Response &amp; Batch into Sentences</div>
+              <div class="cmd-block">async function getAIResponse(transcript, twilioWs) {
+  const result = await model.generateContentStream(transcript);
+
+  let buffer = '';
+  for await (const chunk of result.stream) {
+    const text = chunk.text();
+    buffer += text;
+
+    <span class="comment-c">// When we have a complete sentence, send to TTS</span>
+    if (/[.!?]/.test(buffer)) {
+      const sentence = buffer.trim();
+      buffer = '';
+      await speakToTwilio(sentence, twilioWs); <span class="comment-c">// Step 9</span>
+    }
+  }
+
+  <span class="comment-c">// Send any remaining text</span>
+  if (buffer.trim()) {
+    await speakToTwilio(buffer.trim(), twilioWs);
+  }
+}</div>
+              <div class="callout callout-tip">💡 Buffering until a sentence-end punctuation character means TTS starts working after the first sentence (~0.5s) rather than waiting for the full paragraph.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 9 ───────────── -->
+      <div class="step-item" id="s9">
+        <div class="step-header" onclick="toggleStep('s9')">
+          <div class="step-num">9</div>
+          <div class="step-header-text">
+            <h3>🔊 Convert Text to Speech and Play Over the Call</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-code">ElevenLabs TTS</span>
+              <span class="step-tag t-code">Audio Pipeline</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> How Audio Gets Back to the Caller</div>
+              <p>Twilio's Media Stream WebSocket is <strong>bidirectional</strong>. To play audio back to the caller, you send a JSON message of type <span class="ic">media</span> with base64-encoded audio. Twilio plays it instantly. The audio must be in <strong>µ-law 8kHz format</strong> (same as what Twilio sends you).</p>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Call ElevenLabs Streaming TTS</div>
+              <div class="cmd-block">const axios = require('axios');
+
+async function speakToTwilio(text, twilioWs) {
+  const response = await axios({
+    method: 'post',
+    url: `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}/stream`,
+    headers: {
+      'xi-api-key': process.env.ELEVENLABS_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    data: {
+      text: text,
+      model_id: <span class="val">'eleven_turbo_v2_5'</span>, <span class="comment-c">// Fastest model</span>
+      output_format: <span class="val">'ulaw_8000'</span>,      <span class="comment-c">// Twilio-compatible!</span>
+    },
+    responseType: 'arraybuffer',
+  });
+
+  <span class="comment-c">// Encode audio as base64</span>
+  const audioBase64 = Buffer.from(response.data).toString('base64');
+
+  <span class="comment-c">// Send to Twilio WebSocket</span>
+  if (twilioWs.readyState === WebSocket.OPEN) {
+    twilioWs.send(JSON.stringify({
+      event: <span class="val">'media'</span>,
+      media: { payload: audioBase64 }
+    }));
+  }
+}</div>
+              <div class="callout callout-tip">💡 Using <span class="ic">ulaw_8000</span> output format means you don't need to convert the audio — it's already in Twilio's native format, saving processing time.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────────── STEP 10 ───────────── -->
+      <div class="step-item" id="s10">
+        <div class="step-header" onclick="toggleStep('s10')">
+          <div class="step-num">10</div>
+          <div class="step-header-text">
+            <h3>✅ Run &amp; Test Your AI Call Bot End-to-End</h3>
+            <div class="step-header-meta">
+              <span class="step-tag t-free">Final Test</span>
+              <span class="step-tag t-infra">Live Call</span>
+            </div>
+          </div>
+          <div class="step-chevron">▼</div>
+        </div>
+        <div class="step-body">
+          <div class="substep-list">
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">A</span> Start Everything in Order</div>
+              <p>Open <strong>3 terminal windows</strong>:</p>
+              <div class="cmd-block"><span class="comment-c">Terminal 1 — Start your Node.js server:</span>
+<span class="prompt">$</span> node index.js
+
+<span class="comment-c">Terminal 2 — Start ngrok tunnel:</span>
+<span class="prompt">$</span> ngrok http 3000
+
+<span class="comment-c">Terminal 3 — Watch logs (optional):</span>
+<span class="prompt">$</span> <span class="comment-c">(keep open to see incoming messages)</span></div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">B</span> Update Twilio Webhook with New ngrok URL</div>
+              <p>If ngrok gave you a new URL (it does every restart on free plan):</p>
+              <div class="nav-path">Twilio Console <span>→</span> Phone Numbers <span>→</span> Active Numbers <span>→</span> Your Number <span>→</span> Voice Config</div>
+              <p>Update the webhook URL to: <span class="ic">https://NEW-URL.ngrok-free.app/incoming-call</span> → Save.</p>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">C</span> Make a Test Call</div>
+              <p>Call your Twilio number from your phone. You should hear:</p>
+              <div class="cmd-block">1. Call connects (Twilio Media Stream starts)
+2. You speak: "Hello, what's the weather like?"
+3. Deepgram transcribes your speech → your Terminal 1 shows: "User said: Hello, what's the weather like?"
+4. Gemini generates a streaming response
+5. ElevenLabs converts text to speech
+6. AI voice plays back through the call</div>
+            </div>
+            <div class="substep">
+              <div class="substep-title"><span class="substep-num">D</span> Debugging Tips</div>
+              <div class="cmd-block"><span class="comment-c">Problem: Call connects but no audio from bot</span>
+→ Check ElevenLabs API key and voice ID in .env
+→ Verify output_format is 'ulaw_8000'
+
+<span class="comment-c">Problem: "Invalid XML" error in Twilio logs</span>
+→ Check /incoming-call route returns valid TwiML
+→ The WebSocket URL must use wss:// not ws://
+
+<span class="comment-c">Problem: No transcript from Deepgram</span>
+→ Check DEEPGRAM_API_KEY in .env
+→ Make sure encoding:'mulaw', sample_rate:8000
+
+<span class="comment-c">Problem: ngrok tunnel disconnected</span>
+→ Re-run: ngrok http 3000
+→ Update Twilio webhook URL with new ngrok URL</div>
+              <div class="callout callout-tip">💡 Add <span class="ic">console.log()</span> at each step (after receiving transcript, after Gemini response, after TTS call) to trace exactly where the pipeline breaks.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════
+       SECTION 4 – ENV FILE
+  ══════════════════════════════════════════ -->
+  <section class="env-section">
+    <h2 class="section-title">🔐 .env File Template</h2>
+    <div class="env-block">
+<span class="comment"># ── Twilio ──────────────────────────────────────────────</span><br/>
+<span class="key">TWILIO_ACCOUNT_SID</span><span class="eq">=</span><span class="val">ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span><br/>
+<span class="key">TWILIO_AUTH_TOKEN</span><span class="eq">=</span><span class="val">your_auth_token_here</span><br/>
+<span class="key">TWILIO_PHONE_NUMBER</span><span class="eq">=</span><span class="val">+12025551234</span><br/>
+<br/>
+<span class="comment"># ── Deepgram (Speech-to-Text) ───────────────────────────</span><br/>
+<span class="key">DEEPGRAM_API_KEY</span><span class="eq">=</span><span class="val">your_deepgram_api_key</span><br/>
+<br/>
+<span class="comment"># ── Google Gemini (AI) ──────────────────────────────────</span><br/>
+<span class="key">GEMINI_API_KEY</span><span class="eq">=</span><span class="val">your_gemini_api_key</span><br/>
+<span class="key">GEMINI_MODEL</span><span class="eq">=</span><span class="val">gemini-2.0-flash</span><br/>
+<br/>
+<span class="comment"># ── ElevenLabs (Text-to-Speech) ─────────────────────────</span><br/>
+<span class="key">ELEVENLABS_API_KEY</span><span class="eq">=</span><span class="val">your_elevenlabs_api_key</span><br/>
+<span class="key">ELEVENLABS_VOICE_ID</span><span class="eq">=</span><span class="val">21m00Tcm4TlvDq8ikWAM</span><span class="comment">  # Rachel (default free voice)</span><br/>
+<br/>
+<span class="comment"># ── Server ──────────────────────────────────────────────</span><br/>
+<span class="key">PORT</span><span class="eq">=</span><span class="val">3000</span><br/>
+<span class="key">PUBLIC_URL</span><span class="eq">=</span><span class="val">https://your-ngrok-url.ngrok-free.app</span><br/>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════
+       SECTION 5 – DATA FLOW TABLE
+  ══════════════════════════════════════════ -->
+  <section style="margin-bottom:70px;">
+    <h2 class="section-title">📋 Data Format at Each Hop</h2>
+    <div class="card" style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem;">
+        <thead>
+          <tr style="background:rgba(99,102,241,0.12);text-align:left;">
+            <th style="padding:14px 18px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;font-size:.73rem;">Hop</th>
+            <th style="padding:14px 18px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;font-size:.73rem;">From → To</th>
+            <th style="padding:14px 18px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;font-size:.73rem;">Protocol</th>
+            <th style="padding:14px 18px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;font-size:.73rem;">Data Format</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--border);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">1→2</td>
+            <td style="padding:13px 18px;">Caller → Twilio</td>
+            <td style="padding:13px 18px;color:var(--muted);">PSTN</td>
+            <td style="padding:13px 18px;color:var(--muted);">Voice audio</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border);background:rgba(255,255,255,0.02);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">2→3</td>
+            <td style="padding:13px 18px;">Twilio → Backend</td>
+            <td style="padding:13px 18px;color:var(--muted);">HTTPS POST + WebSocket</td>
+            <td style="padding:13px 18px;color:var(--muted);">TwiML webhook, then base64 μ-law 8kHz PCM over WS</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">3→4</td>
+            <td style="padding:13px 18px;">Backend → Deepgram</td>
+            <td style="padding:13px 18px;color:var(--muted);">WebSocket (wss://)</td>
+            <td style="padding:13px 18px;color:var(--muted);">Raw PCM binary frames, JSON transcript responses</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border);background:rgba(255,255,255,0.02);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">4→5</td>
+            <td style="padding:13px 18px;">Deepgram → Gemini</td>
+            <td style="padding:13px 18px;color:var(--muted);">HTTPS (SDK)</td>
+            <td style="padding:13px 18px;color:var(--muted);">Plain text transcript string as prompt</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">5→6</td>
+            <td style="padding:13px 18px;">Gemini → ElevenLabs</td>
+            <td style="padding:13px 18px;color:var(--muted);">HTTPS Streaming (SSE)</td>
+            <td style="padding:13px 18px;color:var(--muted);">Streamed text token chunks → batched sentences → TTS POST</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border);background:rgba(255,255,255,0.02);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">6→7</td>
+            <td style="padding:13px 18px;">ElevenLabs → Twilio</td>
+            <td style="padding:13px 18px;color:var(--muted);">HTTP Chunked → WebSocket</td>
+            <td style="padding:13px 18px;color:var(--muted);">MP3/μ-law audio bytes → base64 encoded → WS media message</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border);">
+            <td style="padding:13px 18px;font-family:'Fira Code',monospace;color:#a5b4fc;">7→8</td>
+            <td style="padding:13px 18px;">Twilio → Caller</td>
+            <td style="padding:13px 18px;color:var(--muted);">PSTN</td>
+            <td style="padding:13px 18px;color:var(--muted);">Voice audio playback</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════
+       SECTION 6 – LATENCY TIPS
+  ══════════════════════════════════════════ -->
+  <section style="margin-bottom:60px;">
+    <h2 class="section-title">⚡ Latency Optimization Tips</h2>
+    <div class="services-grid">
+      <div class="service-card">
+        <div style="font-size:1.6rem;margin-bottom:10px;">🎙️</div>
+        <div class="service-name" style="margin-bottom:6px;">Use Interim Transcripts</div>
+        <p class="service-detail">Enable <code>interim_results: true</code> in Deepgram. Start sending partial transcript to Gemini while speech is still being recognized to shave off 0.5–1s.</p>
+      </div>
+      <div class="service-card">
+        <div style="font-size:1.6rem;margin-bottom:10px;">🤖</div>
+        <div class="service-name" style="margin-bottom:6px;">Sentence-level TTS Batching</div>
+        <p class="service-detail">Don't wait for Gemini to finish. Buffer tokens until you detect a sentence boundary (<code>. ! ?</code>) then immediately fire TTS for that chunk in parallel with the next Gemini chunk.</p>
+      </div>
+      <div class="service-card">
+        <div style="font-size:1.6rem;margin-bottom:10px;">🔊</div>
+        <div class="service-name" style="margin-bottom:6px;">Pipeline Audio Queuing</div>
+        <p class="service-detail">Queue audio chunks in an in-memory array and drain them sequentially to Twilio. This prevents audio overlap while maintaining smooth playback even with variable TTS latency.</p>
+      </div>
+      <div class="service-card">
+        <div style="font-size:1.6rem;margin-bottom:10px;">🌐</div>
+        <div class="service-name" style="margin-bottom:6px;">Keep Connections Persistent</div>
+        <p class="service-detail">Reuse the Deepgram WebSocket across turns rather than reconnecting on each utterance. Initialize Gemini model once at startup to avoid cold-start overhead.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p>AI Call Bot POC Architecture · Built for exploration with 100% free-tier services · 2026</p>
+    <p style="margin-top:6px;">Twilio · Deepgram · Google Gemini · ElevenLabs · ngrok · Node.js</p>
+  </footer>
+
+</div>
+
+<script>
+  function toggleStep(id) {
+    const item = document.getElementById(id);
+    item.classList.toggle('open');
+  }
+  // Auto-open step 1 on load
+  window.addEventListener('DOMContentLoaded', () => {
+    const first = document.getElementById('s1');
+    if (first) first.classList.add('open');
+  });
+</script>
+</body>
+</html>

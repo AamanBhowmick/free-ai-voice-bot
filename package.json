@@ -1,0 +1,31 @@
+{
+  "name": "ai-call-bot",
+  "version": "1.0.0",
+  "description": "AI Call Bot – Twilio + Deepgram + Gemini + ElevenLabs",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "nodemon --exec ts-node index.ts --ext ts",
+    "dev:node": "nodemon dist/index.js"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "^3.9.0",
+    "@google/generative-ai": "^0.21.0",
+    "axios": "^1.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "twilio": "^5.3.0",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
+    "nodemon": "^3.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}
