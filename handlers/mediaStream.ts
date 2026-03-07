@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import { createDeepgramSession } from '../services/deepgram';
 import { getStreamingResponse } from '../services/gemini';
-import { synthesizeSpeech } from '../services/elevenlabs';
+import { sarvamSynthesizeSpeech } from '../services/sarvamTTS';
 
 interface TwilioMediaMessage {
   event: 'connected' | 'start' | 'media' | 'stop';
@@ -10,15 +10,16 @@ interface TwilioMediaMessage {
   stop?: { accountSid: string; callSid: string };
 }
 
-const GREETING_TEXT = "Hey! This is Alex, your trainer. How can I help you today?";
+const GREETING_TEXT = "Hey! I'm Simran, your personal trainer. Aap kaise hain? How can I help you today?";
+const GREETING_LANG = 'en-IN';
 
-// ── Pre-cache greeting at server start for zero-latency playback ──
+// ── Pre-cache greeting at server start ──
 let cachedGreetingAudio: Buffer | null = null;
 
 export async function preGenerateGreeting(): Promise<void> {
   try {
-    console.log('⏳ Pre-generating greeting audio...');
-    cachedGreetingAudio = await synthesizeSpeech(GREETING_TEXT);
+    console.log('⏳ Pre-generating greeting audio via Sarvam TTS...');
+    cachedGreetingAudio = await sarvamSynthesizeSpeech(GREETING_TEXT, GREETING_LANG);
     console.log(`✅ Greeting pre-cached (${cachedGreetingAudio.length} bytes, ~${(cachedGreetingAudio.length / 8000).toFixed(1)}s)`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -28,8 +29,11 @@ export async function preGenerateGreeting(): Promise<void> {
 
 /**
  * handleMediaStream
- * Orchestrates the full AI pipeline for a single Twilio Media Stream:
- *   Twilio audio → Deepgram STT → Gemini AI (streaming) → ElevenLabs TTS → Twilio audio
+ * Orchestrates the full AI pipeline:
+ *   Twilio audio → Deepgram STT → Gemini AI → Sarvam TTS → Twilio audio
+ *
+ * Uses Deepgram for STT (reliable, working) and Sarvam for TTS (Simran voice).
+ * Detects language from transcript and responds accordingly.
  */
 function handleMediaStream(twilioWs: WebSocket): void {
   console.log('\n🔗 New call connected – AI pipeline starting');
@@ -38,35 +42,39 @@ function handleMediaStream(twilioWs: WebSocket): void {
   let isProcessing = false;
   let audioQueue: Promise<void> = Promise.resolve();
 
-  // ── Deepgram STT session ──────────────────────────────────
+  // ── Deepgram STT session (proven working) ───────────────
   const dgSession = createDeepgramSession(async (transcript: string) => {
     if (!transcript.trim() || isProcessing) return;
 
-    console.log(`\n👤 Caller said: "${transcript}"`);
+    // Simple Hindi detection: check for Devanagari characters
+    const hasHindi = /[\u0900-\u097F]/.test(transcript);
+    const detectedLang = hasHindi ? 'hi-IN' : 'en-IN';
+
+    console.log(`\n👤 Caller said [${detectedLang}]: "${transcript}"`);
     isProcessing = true;
 
     audioQueue = audioQueue.then(async () => {
       try {
         let buffer = '';
 
-        for await (const chunk of getStreamingResponse(transcript)) {
+        for await (const chunk of getStreamingResponse(transcript, detectedLang)) {
           buffer += chunk;
 
-          // Send sentence-by-sentence as soon as punctuation arrives (low-latency TTS)
-          if (/[.!?]/.test(buffer)) {
+          // Stream TTS sentence-by-sentence (support Hindi + English punctuation)
+          if (/[.!?।]/.test(buffer)) {
             const sentence = buffer.trim();
             buffer = '';
             if (sentence) {
-              console.log(`🤖 AI: "${sentence}"`);
-              await sendTextAsAudio(sentence, twilioWs, streamSid);
+              console.log(`🤖 AI [${detectedLang}]: "${sentence}"`);
+              await sendTextAsAudio(sentence, twilioWs, streamSid, detectedLang);
             }
           }
         }
 
         // Flush trailing text
         if (buffer.trim()) {
-          console.log(`🤖 AI (flush): "${buffer.trim()}"`);
-          await sendTextAsAudio(buffer.trim(), twilioWs, streamSid);
+          console.log(`🤖 AI (flush) [${detectedLang}]: "${buffer.trim()}"`);
+          await sendTextAsAudio(buffer.trim(), twilioWs, streamSid, detectedLang);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -90,7 +98,6 @@ function handleMediaStream(twilioWs: WebSocket): void {
         case 'start':
           streamSid = msg.start?.streamSid ?? null;
           console.log(`▶️  Stream SID: ${streamSid}`);
-          // Send greeting immediately (use cache if available)
           greetCaller(twilioWs, streamSid);
           break;
 
@@ -121,26 +128,26 @@ function handleMediaStream(twilioWs: WebSocket): void {
   });
 }
 
-// ── Greet caller — use pre-cached audio or generate on demand ──────
+// ── Greet caller ──────────────────────────────────────────────────
 async function greetCaller(twilioWs: WebSocket, streamSid: string | null): Promise<void> {
   console.log(`👋 Sending greeting (cache: ${cachedGreetingAudio ? 'HIT' : 'MISS'})`);
 
   if (cachedGreetingAudio) {
     sendBufferToTwilio(cachedGreetingAudio, twilioWs, streamSid);
   } else {
-    // Cache miss — generate on-demand (slower, only happens if server just started)
-    await sendTextAsAudio(GREETING_TEXT, twilioWs, streamSid);
+    await sendTextAsAudio(GREETING_TEXT, twilioWs, streamSid, GREETING_LANG);
   }
 }
 
-// ── Generate TTS from text and send to Twilio ─────────────────────
+// ── TTS → audio → Twilio ─────────────────────────────────────────
 async function sendTextAsAudio(
   text: string,
   ws: WebSocket,
-  streamSid: string | null
+  streamSid: string | null,
+  language: string
 ): Promise<void> {
   try {
-    const audioBuffer = await synthesizeSpeech(text);
+    const audioBuffer = await sarvamSynthesizeSpeech(text, language);
     sendBufferToTwilio(audioBuffer, ws, streamSid);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -148,7 +155,7 @@ async function sendTextAsAudio(
   }
 }
 
-// ── Send a pre-built audio buffer to Twilio over WebSocket ────────
+// ── Send raw µ-law buffer to Twilio in chunks ────────────────────
 function sendBufferToTwilio(
   audioBuffer: Buffer,
   ws: WebSocket,
@@ -163,7 +170,7 @@ function sendBufferToTwilio(
     return;
   }
 
-  const CHUNK = 8000; // send in 1-second chunks to avoid large WS frames
+  const CHUNK = 8000; // 1-second chunks
 
   for (let offset = 0; offset < audioBuffer.length; offset += CHUNK) {
     const slice = audioBuffer.subarray(offset, offset + CHUNK);
