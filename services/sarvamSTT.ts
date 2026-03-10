@@ -1,4 +1,5 @@
-import WebSocket from 'ws';
+import { SarvamAIClient } from 'sarvamai';
+import { Readable } from 'stream';
 
 type TranscriptCallback = (transcript: string, detectedLanguage: string) => void;
 
@@ -7,10 +8,8 @@ interface SarvamSTTSession {
   close: () => void;
 }
 
-/**
- * G.711 µ-law decoder — converts a single µ-law byte to a 16-bit PCM sample.
- * This is the inverse of the ITU-T G.711 µ-law encoder.
- */
+// ── µ-law decoder ──────────────────────────────────────────────────
+
 function decodeMulaw(mulawByte: number): number {
   mulawByte = ~mulawByte & 0xff;
   const sign = mulawByte & 0x80;
@@ -21,144 +20,181 @@ function decodeMulaw(mulawByte: number): number {
   return sign ? -sample : sample;
 }
 
-/**
- * Convert a Buffer of µ-law 8kHz bytes to PCM Int16LE 8kHz.
- * Each µ-law byte → 2-byte Int16LE sample.
- */
 function mulawToPcm16(mulawBuf: Buffer): Buffer {
   const pcm = Buffer.alloc(mulawBuf.length * 2);
   for (let i = 0; i < mulawBuf.length; i++) {
-    const sample = decodeMulaw(mulawBuf[i]);
-    pcm.writeInt16LE(sample, i * 2);
+    pcm.writeInt16LE(decodeMulaw(mulawBuf[i]), i * 2);
   }
   return pcm;
 }
 
+// ── WAV header builder ─────────────────────────────────────────────
+
+function buildWavHeader(dataLength: number, sampleRate: number): Buffer {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataLength, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);           // PCM chunk size
+  header.writeUInt16LE(1, 20);            // PCM format
+  header.writeUInt16LE(1, 22);            // mono
+  header.writeUInt32LE(sampleRate, 24);   // sample rate
+  header.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  header.writeUInt16LE(2, 32);            // block align
+  header.writeUInt16LE(16, 34);           // bits per sample
+  header.write('data', 36);
+  header.writeUInt32LE(dataLength, 40);
+  return header;
+}
+
+// ── Silence detection helpers ──────────────────────────────────────
+
+/**
+ * Calculate RMS (root mean square) amplitude of a PCM16LE buffer.
+ * Returns a value between 0 and ~32768.
+ */
+function calcRMS(pcmBuf: Buffer): number {
+  const samples = Math.floor(pcmBuf.length / 2);
+  if (samples === 0) return 0;
+  let sumSq = 0;
+  for (let i = 0; i < samples; i++) {
+    const s = pcmBuf.readInt16LE(i * 2);
+    sumSq += s * s;
+  }
+  return Math.sqrt(sumSq / samples);
+}
+
+// ── Main Session ───────────────────────────────────────────────────
+
 /**
  * createSarvamSTTSession
- * Opens a WebSocket to Sarvam AI's streaming STT endpoint.
- * Receives Twilio µ-law 8kHz audio, decodes to PCM, and streams to Sarvam.
  *
- * Uses `saaras:v3` with `transcribe` mode and auto language detection.
+ * Uses Sarvam AI's REST STT (Saaras v3) with chunked audio.
+ * Accumulates audio from Twilio, detects silence via amplitude,
+ * then sends the chunk as a WAV file to Sarvam for transcription.
  *
- * @param onTranscript - called with each final transcript and detected language
- * @returns session with .send() and .close() methods
+ * Captures both Hindi and English with auto-detection.
  */
 export function createSarvamSTTSession(onTranscript: TranscriptCallback): SarvamSTTSession {
   const apiKey = process.env.SARVAM_API_KEY ?? '';
 
   if (!apiKey || apiKey === 'your_sarvam_api_key') {
-    console.error('❌ SARVAM_API_KEY is missing or not set in .env!');
-    console.error('   Get your key at: https://console.sarvam.ai');
+    console.error('❌ SARVAM_API_KEY is missing!');
   } else {
     console.log(`🔑 Sarvam STT key loaded: ${apiKey.slice(0, 12)}...`);
   }
 
-  // Build WebSocket URL with query parameters
-  const wsUrl = new URL('wss://api.sarvam.ai/speech-to-text/ws');
-  wsUrl.searchParams.set('api_subscription_key', apiKey);  // auth via query param
-  wsUrl.searchParams.set('model', 'saaras:v3');
-  wsUrl.searchParams.set('mode', 'transcribe');
-  wsUrl.searchParams.set('language_code', 'unknown');       // auto-detect language
-  wsUrl.searchParams.set('sample_rate', '8000');
-  wsUrl.searchParams.set('input_audio_codec', 'pcm_s16le');
-  wsUrl.searchParams.set('high_vad_sensitivity', 'true');
-  wsUrl.searchParams.set('vad_signals', 'true');
+  const client = new SarvamAIClient({ apiSubscriptionKey: apiKey });
 
-  console.log(`🔗 Sarvam STT connecting to: ${wsUrl.toString().replace(apiKey, '***')}`);
+  // Audio accumulation state
+  const pcmChunks: Buffer[] = [];
+  let totalPcmBytes = 0;
+  let silenceFrames = 0;
+  let speechDetected = false;
+  let isProcessing = false;
+  let closed = false;
 
-  const ws = new WebSocket(wsUrl.toString(), {
-    headers: {
-      'api-subscription-key': apiKey,
-    },
-  });
-
-  let isOpen = false;
-  let pendingChunks: Buffer[] = [];
-
-  ws.on('open', () => {
-    isOpen = true;
-    console.log('🎙️  Sarvam STT WebSocket opened');
-
-    // Send any buffered audio
-    for (const chunk of pendingChunks) {
-      sendPcmChunk(chunk);
-    }
-    pendingChunks = [];
-  });
-
-  ws.on('message', (data: WebSocket.Data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-
-      if (msg.type === 'speech_start') {
-        console.log('🗣️  Sarvam: speech detected');
-      } else if (msg.type === 'speech_end') {
-        console.log('🤫 Sarvam: speech ended');
-      } else if (msg.type === 'transcript') {
-        const text: string = msg.transcript ?? msg.text ?? '';
-        const lang: string = msg.language_code ?? msg.lang ?? 'en-IN';
-        if (text.trim()) {
-          console.log(`📝 Sarvam STT [${lang}]: "${text.trim()}"`);
-          onTranscript(text.trim(), lang);
-        }
-      } else {
-        // Handle any other response formats
-        const text = msg.transcript ?? msg.text ?? '';
-        if (text && typeof text === 'string' && text.trim()) {
-          const lang = msg.language_code ?? 'en-IN';
-          console.log(`📝 Sarvam STT [${lang}]: "${text.trim()}"`);
-          onTranscript(text.trim(), lang);
-        }
-      }
-    } catch (err: unknown) {
-      const m = err instanceof Error ? err.message : String(err);
-      console.error('❌ Sarvam STT parse error:', m, '| raw:', data.toString().slice(0, 200));
-    }
-  });
-
-  ws.on('error', (err: Error) => {
-    console.error('❌ Sarvam STT WebSocket error:', err.message);
-  });
-
-  ws.on('close', (code: number, reason: Buffer) => {
-    isOpen = false;
-    console.log(`🎙️  Sarvam STT closed (code: ${code}, reason: ${reason.toString() || 'n/a'})`);
-  });
+  // Tuning constants
+  const SILENCE_THRESHOLD = 200;    // RMS below this = silence
+  const SILENCE_FRAMES_NEEDED = 10; // ~10 frames of silence = ~1.25s
+  const MIN_SPEECH_BYTES = 3200;    // minimum ~0.2s of audio to process
+  const MAX_SPEECH_BYTES = 240000;  // max ~15s of audio before force-flush
 
   /**
-   * Send a PCM16LE chunk as base64-encoded JSON to Sarvam.
-   * Sarvam's streaming API expects: { "audio": "<base64>", "encoding": "pcm_s16le", "sample_rate": 8000 }
+   * Process a µ-law audio chunk from Twilio.
+   * Converts mulaw→PCM, accumulates, and detects speech boundaries.
    */
-  function sendPcmChunk(pcmBuffer: Buffer): void {
-    if (ws.readyState !== WebSocket.OPEN) return;
+  function processAudio(mulawBuffer: Buffer): void {
+    if (closed || isProcessing) return;
 
-    ws.send(JSON.stringify({
-      audio: pcmBuffer.toString('base64'),
-      encoding: 'pcm_s16le',
-      sample_rate: 8000,
-    }));
+    const pcmBuffer = mulawToPcm16(mulawBuffer);
+    const rms = calcRMS(pcmBuffer);
+
+    if (rms > SILENCE_THRESHOLD) {
+      // Speech detected
+      speechDetected = true;
+      silenceFrames = 0;
+      pcmChunks.push(pcmBuffer);
+      totalPcmBytes += pcmBuffer.length;
+    } else if (speechDetected) {
+      // Silence after speech
+      silenceFrames++;
+      pcmChunks.push(pcmBuffer); // include trailing silence for cleaner cutoff
+      totalPcmBytes += pcmBuffer.length;
+
+      if (silenceFrames >= SILENCE_FRAMES_NEEDED && totalPcmBytes >= MIN_SPEECH_BYTES) {
+        // End of speech segment — flush to STT
+        flushToSTT();
+      }
+    }
+
+    // Force flush if too much audio accumulated (prevents very long speeches from being lost)
+    if (totalPcmBytes >= MAX_SPEECH_BYTES) {
+      flushToSTT();
+    }
+  }
+
+  /**
+   * Send accumulated audio to Sarvam REST STT.
+   */
+  async function flushToSTT(): Promise<void> {
+    if (pcmChunks.length === 0 || isProcessing) return;
+
+    isProcessing = true;
+
+    // Grab the accumulated PCM data and reset
+    const pcmData = Buffer.concat(pcmChunks);
+    pcmChunks.length = 0;
+    totalPcmBytes = 0;
+    silenceFrames = 0;
+    speechDetected = false;
+
+    const duration = (pcmData.length / (8000 * 2)).toFixed(1);
+    console.log(`🎤 Sending ${pcmData.length}B (~${duration}s) to Sarvam STT...`);
+
+    try {
+      // Build WAV file from PCM data
+      const wavHeader = buildWavHeader(pcmData.length, 8000);
+      const wavBuffer = Buffer.concat([wavHeader, pcmData]);
+
+      // Create a readable stream from the WAV buffer for the SDK
+      const audioStream = Readable.from(wavBuffer);
+
+      const result = await client.speechToText.transcribe({
+        file: audioStream,
+        model: 'saaras:v3',
+        language_code: 'unknown',  // auto-detect Hindi/English
+      });
+
+      const transcript = (result as any).transcript ?? '';
+      const langCode = (result as any).language_code ?? 'en-IN';
+
+      if (transcript.trim()) {
+        console.log(`📝 Sarvam STT [${langCode}]: "${transcript.trim()}"`);
+        onTranscript(transcript.trim(), langCode);
+      } else {
+        console.log('📝 Sarvam STT: (empty transcript)');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('❌ Sarvam STT error:', msg);
+    } finally {
+      isProcessing = false;
+    }
   }
 
   return {
-    /**
-     * Accepts raw µ-law 8kHz audio from Twilio, converts to PCM16LE,
-     * and sends to Sarvam STT WebSocket.
-     */
     send(mulawBuffer: Buffer): void {
-      const pcmBuffer = mulawToPcm16(mulawBuffer);
-
-      if (isOpen) {
-        sendPcmChunk(pcmBuffer);
-      } else {
-        pendingChunks.push(pcmBuffer);
-      }
+      processAudio(mulawBuffer);
     },
-
     close(): void {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
+      closed = true;
+      // Flush any remaining audio
+      if (pcmChunks.length > 0 && totalPcmBytes >= MIN_SPEECH_BYTES) {
+        flushToSTT();
       }
+      console.log('🎙️  Sarvam STT session closed');
     },
   };
 }

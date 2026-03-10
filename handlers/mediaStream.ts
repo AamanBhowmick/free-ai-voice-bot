@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { createDeepgramSession } from '../services/deepgram';
+import { createSarvamSTTSession } from '../services/sarvamSTT';
 import { getStreamingResponse } from '../services/gemini';
 import { sarvamSynthesizeSpeech } from '../services/sarvamTTS';
 
@@ -29,11 +29,10 @@ export async function preGenerateGreeting(): Promise<void> {
 
 /**
  * handleMediaStream
- * Orchestrates the full AI pipeline:
- *   Twilio audio → Deepgram STT → Gemini AI → Sarvam TTS → Twilio audio
+ * Orchestrates the full AI pipeline using ONLY Sarvam AI for both STT and TTS:
+ *   Twilio audio → Sarvam STT (REST, chunked) → Gemini AI → Sarvam TTS → Twilio audio
  *
- * Uses Deepgram for STT (reliable, working) and Sarvam for TTS (Simran voice).
- * Detects language from transcript and responds accordingly.
+ * Auto-detects Hindi/English and responds in the same language.
  */
 function handleMediaStream(twilioWs: WebSocket): void {
   console.log('\n🔗 New call connected – AI pipeline starting');
@@ -42,13 +41,9 @@ function handleMediaStream(twilioWs: WebSocket): void {
   let isProcessing = false;
   let audioQueue: Promise<void> = Promise.resolve();
 
-  // ── Deepgram STT session (proven working) ───────────────
-  const dgSession = createDeepgramSession(async (transcript: string) => {
+  // ── Sarvam STT session (chunked REST with VAD) ──────────
+  const sttSession = createSarvamSTTSession(async (transcript: string, detectedLang: string) => {
     if (!transcript.trim() || isProcessing) return;
-
-    // Simple Hindi detection: check for Devanagari characters
-    const hasHindi = /[\u0900-\u097F]/.test(transcript);
-    const detectedLang = hasHindi ? 'hi-IN' : 'en-IN';
 
     console.log(`\n👤 Caller said [${detectedLang}]: "${transcript}"`);
     isProcessing = true;
@@ -60,7 +55,7 @@ function handleMediaStream(twilioWs: WebSocket): void {
         for await (const chunk of getStreamingResponse(transcript, detectedLang)) {
           buffer += chunk;
 
-          // Stream TTS sentence-by-sentence (support Hindi + English punctuation)
+          // Stream TTS sentence-by-sentence (Hindi + English punctuation)
           if (/[.!?।]/.test(buffer)) {
             const sentence = buffer.trim();
             buffer = '';
@@ -102,9 +97,9 @@ function handleMediaStream(twilioWs: WebSocket): void {
           break;
 
         case 'media':
-          if (msg.media?.track === 'inbound' && dgSession) {
+          if (msg.media?.track === 'inbound') {
             const audioBuffer = Buffer.from(msg.media.payload, 'base64');
-            dgSession.send(audioBuffer as unknown as Blob);
+            sttSession.send(audioBuffer);
           }
           break;
 
@@ -120,7 +115,7 @@ function handleMediaStream(twilioWs: WebSocket): void {
 
   twilioWs.on('close', () => {
     console.log('🔌 Call ended – WebSocket closed\n');
-    dgSession?.finish();
+    sttSession.close();
   });
 
   twilioWs.on('error', (err: Error) => {
