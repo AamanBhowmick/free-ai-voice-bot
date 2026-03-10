@@ -2,11 +2,14 @@ import { SarvamAIClient } from 'sarvamai';
 import { Readable } from 'stream';
 
 type TranscriptCallback = (transcript: string, detectedLanguage: string) => void;
+type InterruptCallback = () => void;
 
 interface SarvamSTTSession {
   send: (mulawBuffer: Buffer) => void;
   close: () => void;
   mute: (durationMs: number) => void;
+  /** Set to true while bot is speaking — STT will detect speech as barge-in */
+  setBotSpeaking: (speaking: boolean) => void;
 }
 
 // ── µ-law decoder ──────────────────────────────────────────────────
@@ -37,13 +40,13 @@ function buildWavHeader(dataLength: number, sampleRate: number): Buffer {
   header.writeUInt32LE(36 + dataLength, 4);
   header.write('WAVE', 8);
   header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);           // PCM chunk size
-  header.writeUInt16LE(1, 20);            // PCM format
-  header.writeUInt16LE(1, 22);            // mono
-  header.writeUInt32LE(sampleRate, 24);   // sample rate
-  header.writeUInt32LE(sampleRate * 2, 28); // byte rate
-  header.writeUInt16LE(2, 32);            // block align
-  header.writeUInt16LE(16, 34);           // bits per sample
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
   header.write('data', 36);
   header.writeUInt32LE(dataLength, 40);
   return header;
@@ -51,10 +54,6 @@ function buildWavHeader(dataLength: number, sampleRate: number): Buffer {
 
 // ── Silence detection helpers ──────────────────────────────────────
 
-/**
- * Calculate RMS (root mean square) amplitude of a PCM16LE buffer.
- * Returns a value between 0 and ~32768.
- */
 function calcRMS(pcmBuf: Buffer): number {
   const samples = Math.floor(pcmBuf.length / 2);
   if (samples === 0) return 0;
@@ -71,13 +70,17 @@ function calcRMS(pcmBuf: Buffer): number {
 /**
  * createSarvamSTTSession
  *
- * Uses Sarvam AI's REST STT (Saaras v3) with chunked audio.
- * Accumulates audio from Twilio, detects silence via amplitude,
- * then sends the chunk as a WAV file to Sarvam for transcription.
+ * Uses Sarvam AI's REST STT with chunked audio.
+ * Supports barge-in: when botSpeaking=true, detects loud speech
+ * and fires the onInterrupt callback to cancel the bot's TTS.
  *
- * Captures both Hindi and English with auto-detection.
+ * @param onTranscript - called with finished transcript + detected language
+ * @param onInterrupt  - called when user speaks while bot is talking (barge-in)
  */
-export function createSarvamSTTSession(onTranscript: TranscriptCallback): SarvamSTTSession {
+export function createSarvamSTTSession(
+  onTranscript: TranscriptCallback,
+  onInterrupt: InterruptCallback
+): SarvamSTTSession {
   const apiKey = process.env.SARVAM_API_KEY ?? '';
 
   if (!apiKey || apiKey === 'your_sarvam_api_key') {
@@ -96,56 +99,79 @@ export function createSarvamSTTSession(onTranscript: TranscriptCallback): Sarvam
   let isProcessing = false;
   let closed = false;
   let mutedUntil = 0;
+  let botSpeaking = false;
+  let bargeInFrames = 0;
 
-  // Tuning constants (optimized for speed)
-  const SILENCE_THRESHOLD = 150;    // RMS below this = silence
-  const SILENCE_FRAMES_NEEDED = 8;  // ~8 frames of silence = ~1s (let user finish sentence)
-  const MIN_SPEECH_BYTES = 3200;    // minimum ~0.2s of audio to process
-  const MAX_SPEECH_BYTES = 240000;  // max ~15s of audio before force-flush
+  // Tuning constants
+  const SILENCE_THRESHOLD = 150;
+  const SILENCE_FRAMES_NEEDED = 8;   // ~1s for user to finish
+  const MIN_SPEECH_BYTES = 3200;
+  const MAX_SPEECH_BYTES = 240000;
+  const BARGE_IN_THRESHOLD = 250;    // Higher threshold for barge-in (must speak clearly)
+  const BARGE_IN_FRAMES = 3;         // ~0.4s of loud speech = definite barge-in
 
-  /**
-   * Process a µ-law audio chunk from Twilio.
-   * Converts mulaw→PCM, accumulates, and detects speech boundaries.
-   */
   function processAudio(mulawBuffer: Buffer): void {
-    if (closed || isProcessing || Date.now() < mutedUntil) return;
+    if (closed) return;
+
+    // Skip if hard-muted (greeting only)
+    if (Date.now() < mutedUntil) return;
 
     const pcmBuffer = mulawToPcm16(mulawBuffer);
     const rms = calcRMS(pcmBuffer);
 
+    // ── Barge-in detection: user speaking while bot talks ──
+    if (botSpeaking) {
+      if (rms > BARGE_IN_THRESHOLD) {
+        bargeInFrames++;
+        if (bargeInFrames >= BARGE_IN_FRAMES) {
+          console.log('🗣️  BARGE-IN detected! User is interrupting.');
+          bargeInFrames = 0;
+          botSpeaking = false;
+          isProcessing = false;
+
+          // Clear any accumulated audio
+          pcmChunks.length = 0;
+          totalPcmBytes = 0;
+          silenceFrames = 0;
+          speechDetected = false;
+
+          // Fire interrupt callback
+          onInterrupt();
+        }
+      } else {
+        bargeInFrames = 0;
+      }
+      return; // Don't accumulate audio while bot is speaking
+    }
+
+    // ── Normal speech accumulation ──
+    if (isProcessing) return;
+
     if (rms > SILENCE_THRESHOLD) {
-      // Speech detected
       speechDetected = true;
       silenceFrames = 0;
       pcmChunks.push(pcmBuffer);
       totalPcmBytes += pcmBuffer.length;
     } else if (speechDetected) {
-      // Silence after speech
       silenceFrames++;
-      pcmChunks.push(pcmBuffer); // include trailing silence for cleaner cutoff
+      pcmChunks.push(pcmBuffer);
       totalPcmBytes += pcmBuffer.length;
 
       if (silenceFrames >= SILENCE_FRAMES_NEEDED && totalPcmBytes >= MIN_SPEECH_BYTES) {
-        // End of speech segment — flush to STT
         flushToSTT();
       }
     }
 
-    // Force flush if too much audio accumulated (prevents very long speeches from being lost)
     if (totalPcmBytes >= MAX_SPEECH_BYTES) {
       flushToSTT();
     }
   }
 
-  /**
-   * Send accumulated audio to Sarvam REST STT.
-   */
   async function flushToSTT(): Promise<void> {
     if (pcmChunks.length === 0 || isProcessing) return;
 
     isProcessing = true;
 
-    // Grab the accumulated PCM data and reset
     const pcmData = Buffer.concat(pcmChunks);
     pcmChunks.length = 0;
     totalPcmBytes = 0;
@@ -156,17 +182,14 @@ export function createSarvamSTTSession(onTranscript: TranscriptCallback): Sarvam
     console.log(`🎤 Sending ${pcmData.length}B (~${duration}s) to Sarvam STT...`);
 
     try {
-      // Build WAV file from PCM data
       const wavHeader = buildWavHeader(pcmData.length, 8000);
       const wavBuffer = Buffer.concat([wavHeader, pcmData]);
-
-      // Create a readable stream from the WAV buffer for the SDK
       const audioStream = Readable.from(wavBuffer);
 
       const result = await client.speechToText.transcribe({
         file: audioStream,
         model: 'saaras:v3',
-        language_code: 'unknown',  // auto-detect Hindi/English
+        language_code: 'unknown',
       });
 
       const transcript = (result as any).transcript ?? '';
@@ -197,13 +220,23 @@ export function createSarvamSTTSession(onTranscript: TranscriptCallback): Sarvam
       }
       console.log('🎙️  Sarvam STT session closed');
     },
-    /** Mute STT for durationMs ms (prevents greeting/TTS echo pickup) */
     mute(durationMs: number): void {
       mutedUntil = Date.now() + durationMs;
       pcmChunks.length = 0;
       totalPcmBytes = 0;
       silenceFrames = 0;
       speechDetected = false;
+    },
+    setBotSpeaking(speaking: boolean): void {
+      botSpeaking = speaking;
+      bargeInFrames = 0;
+      if (!speaking) {
+        // Clear accumulated audio when bot stops speaking
+        pcmChunks.length = 0;
+        totalPcmBytes = 0;
+        silenceFrames = 0;
+        speechDetected = false;
+      }
     },
   };
 }

@@ -1,16 +1,16 @@
 import WebSocket from 'ws';
 
 /**
- * Sarvam AI TTS — WebSocket Streaming
+ * Sarvam AI TTS — WebSocket Streaming with Barge-In Support
  *
  * Protocol:
  *   1. Connect to wss://api.sarvam.ai/text-to-speech/ws?model=bulbul:v3
- *   2. Send config message (speaker, language, codec=mulaw, sample_rate=8000)
+ *   2. Send config message (speaker, language, codec=mulaw)
  *   3. Send text message
  *   4. Send flush message
  *   5. Receive audio chunks (base64-encoded mulaw) progressively
  *
- * This gives us mulaw 8kHz directly — zero conversion needed for Twilio!
+ * Returns a cancel() function for barge-in interruption.
  */
 
 interface TTSStreamOptions {
@@ -21,19 +21,28 @@ interface TTSStreamOptions {
   onError: (err: Error) => void;
 }
 
+/** Handle returned by sarvamStreamTTS — call cancel() to stop mid-stream */
+export interface TTSHandle {
+  cancel: () => void;
+}
+
 /**
  * sarvamStreamTTS
  * Opens a WebSocket to Sarvam TTS, streams text, and calls back with
- * mulaw audio chunks as they arrive. Much lower latency than REST.
+ * mulaw audio chunks as they arrive.
+ *
+ * Returns a TTSHandle with a cancel() method for barge-in.
  */
-export function sarvamStreamTTS(options: TTSStreamOptions): void {
+export function sarvamStreamTTS(options: TTSStreamOptions): TTSHandle {
   const { text, language, onAudioChunk, onDone, onError } = options;
   const apiKey = process.env.SARVAM_API_KEY ?? '';
   const speaker = (process.env.SARVAM_TTS_SPEAKER ?? 'simran').toLowerCase();
 
+  let cancelled = false;
+
   if (!apiKey) {
     onError(new Error('SARVAM_API_KEY is missing'));
-    return;
+    return { cancel: () => {} };
   }
 
   const langCode = normalizeLangCode(language);
@@ -49,81 +58,96 @@ export function sarvamStreamTTS(options: TTSStreamOptions): void {
 
   let chunkCount = 0;
   let totalBytes = 0;
+  let resolved = false;
+
+  function finish() {
+    if (resolved) return;
+    resolved = true;
+    if (cancelled) return; // Don't call onDone if cancelled
+    onDone();
+  }
 
   ws.on('open', () => {
+    if (cancelled) { ws.close(); return; }
+
     // Step 1: Send config
-    const configMsg = {
+    ws.send(JSON.stringify({
       type: 'config',
       data: {
         speaker,
         target_language_code: langCode,
         output_audio_codec: 'mulaw',
       },
-    };
-    console.log('📤 TTS WS config:', JSON.stringify(configMsg));
-    ws.send(JSON.stringify(configMsg));
+    }));
 
     // Step 2: Send text
-    const textMsg = { type: 'text', data: { text } };
-    console.log('📤 TTS WS text:', JSON.stringify(textMsg).slice(0, 200));
-    ws.send(JSON.stringify(textMsg));
+    ws.send(JSON.stringify({ type: 'text', data: { text } }));
 
-    // Step 3: Flush to trigger generation
+    // Step 3: Flush
     ws.send(JSON.stringify({ type: 'flush' }));
-    console.log('📤 TTS WS flush sent');
   });
 
   ws.on('message', (rawData: WebSocket.Data) => {
+    if (cancelled) return;
+
     try {
       const msg = JSON.parse(rawData.toString());
 
-      // Audio chunk received
       if (msg.type === 'audio' && msg.data?.audio) {
         const rawChunk = Buffer.from(msg.data.audio, 'base64');
         const audioChunk = downsampleMulaw(rawChunk, 24000, 8000);
         chunkCount++;
         totalBytes += audioChunk.length;
         onAudioChunk(audioChunk);
-      }
-      // Completion event
-      else if (msg.type === 'event' && msg.data?.event_type === 'final') {
-        console.log(`🎵 TTS stream done: ${chunkCount} chunks, ${totalBytes}B (~${(totalBytes / 8000).toFixed(1)}s)`);
+      } else if (msg.type === 'event' && msg.data?.event_type === 'final') {
+        console.log(`🎵 TTS done: ${chunkCount} chunks, ${totalBytes}B (~${(totalBytes / 8000).toFixed(1)}s)`);
         ws.close();
-        onDone();
+        finish();
+      } else if (msg.type === 'error') {
+        console.log('📥 TTS error:', JSON.stringify(msg).slice(0, 300));
       }
-      // Log other messages (errors, etc.)
-      else {
-        console.log('📥 TTS WS msg:', JSON.stringify(msg).slice(0, 300));
-      }
-    } catch (err: unknown) {
-      // Binary audio data (non-JSON)
-      if (Buffer.isBuffer(rawData)) {
+    } catch {
+      if (Buffer.isBuffer(rawData) && !cancelled) {
         const audioChunk = downsampleMulaw(rawData, 24000, 8000);
         chunkCount++;
         totalBytes += audioChunk.length;
         onAudioChunk(audioChunk);
-      } else {
-        console.log('📥 TTS WS raw:', rawData.toString().slice(0, 300));
       }
     }
   });
 
   ws.on('error', (err: Error) => {
-    console.error('❌ TTS stream WS error:', err.message);
-    onError(err);
-  });
-
-  ws.on('close', (code: number, reason: Buffer) => {
-    if (chunkCount === 0) {
-      console.error(`❌ TTS stream closed without audio (code: ${code}, reason: ${reason.toString() || 'n/a'})`);
-      onError(new Error(`TTS stream closed without audio (code: ${code})`));
+    if (!cancelled) {
+      console.error('❌ TTS WS error:', err.message);
+      onError(err);
     }
   });
+
+  ws.on('close', (code: number) => {
+    if (chunkCount === 0 && !cancelled && !resolved) {
+      console.error(`❌ TTS closed without audio (code: ${code})`);
+      onError(new Error(`TTS closed without audio (code: ${code})`));
+    }
+  });
+
+  return {
+    cancel() {
+      if (cancelled) return;
+      cancelled = true;
+      console.log('🛑 TTS cancelled (barge-in)');
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+      if (!resolved) {
+        resolved = true;
+      }
+    },
+  };
 }
 
 /**
  * sarvamSynthesizeSpeech (Promise-based wrapper)
- * For backward compatibility: collects all streaming chunks into a single buffer.
+ * Collects all streaming chunks into a single buffer.
  * Used for greeting pre-caching.
  */
 export function sarvamSynthesizeSpeech(
@@ -145,13 +169,9 @@ export function sarvamSynthesizeSpeech(
 
 // ── Mulaw downsampling ─────────────────────────────────────────────
 
-/**
- * Downsample mulaw audio by picking every Nth sample.
- * Mulaw = 1 byte per sample, so 24kHz→8kHz = take every 3rd byte.
- */
 function downsampleMulaw(buf: Buffer, srcRate: number, targetRate: number): Buffer {
   if (srcRate === targetRate) return buf;
-  const ratio = Math.round(srcRate / targetRate); // 24000/8000 = 3
+  const ratio = Math.round(srcRate / targetRate);
   const outLen = Math.floor(buf.length / ratio);
   const out = Buffer.alloc(outLen);
   for (let i = 0; i < outLen; i++) {
