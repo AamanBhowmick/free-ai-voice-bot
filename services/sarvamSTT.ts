@@ -6,6 +6,7 @@ type TranscriptCallback = (transcript: string, detectedLanguage: string) => void
 interface SarvamSTTSession {
   send: (mulawBuffer: Buffer) => void;
   close: () => void;
+  mute: (durationMs: number) => void;
 }
 
 // ── µ-law decoder ──────────────────────────────────────────────────
@@ -94,10 +95,11 @@ export function createSarvamSTTSession(onTranscript: TranscriptCallback): Sarvam
   let speechDetected = false;
   let isProcessing = false;
   let closed = false;
+  let mutedUntil = 0;
 
-  // Tuning constants
-  const SILENCE_THRESHOLD = 200;    // RMS below this = silence
-  const SILENCE_FRAMES_NEEDED = 10; // ~10 frames of silence = ~1.25s
+  // Tuning constants (optimized for speed)
+  const SILENCE_THRESHOLD = 150;    // RMS below this = silence
+  const SILENCE_FRAMES_NEEDED = 8;  // ~8 frames of silence = ~1s (let user finish sentence)
   const MIN_SPEECH_BYTES = 3200;    // minimum ~0.2s of audio to process
   const MAX_SPEECH_BYTES = 240000;  // max ~15s of audio before force-flush
 
@@ -106,7 +108,7 @@ export function createSarvamSTTSession(onTranscript: TranscriptCallback): Sarvam
    * Converts mulaw→PCM, accumulates, and detects speech boundaries.
    */
   function processAudio(mulawBuffer: Buffer): void {
-    if (closed || isProcessing) return;
+    if (closed || isProcessing || Date.now() < mutedUntil) return;
 
     const pcmBuffer = mulawToPcm16(mulawBuffer);
     const rms = calcRMS(pcmBuffer);
@@ -190,11 +192,18 @@ export function createSarvamSTTSession(onTranscript: TranscriptCallback): Sarvam
     },
     close(): void {
       closed = true;
-      // Flush any remaining audio
       if (pcmChunks.length > 0 && totalPcmBytes >= MIN_SPEECH_BYTES) {
         flushToSTT();
       }
       console.log('🎙️  Sarvam STT session closed');
+    },
+    /** Mute STT for durationMs ms (prevents greeting/TTS echo pickup) */
+    mute(durationMs: number): void {
+      mutedUntil = Date.now() + durationMs;
+      pcmChunks.length = 0;
+      totalPcmBytes = 0;
+      silenceFrames = 0;
+      speechDetected = false;
     },
   };
 }

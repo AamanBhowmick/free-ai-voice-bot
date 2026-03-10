@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import { createSarvamSTTSession } from '../services/sarvamSTT';
-import { getStreamingResponse } from '../services/gemini';
-import { sarvamSynthesizeSpeech } from '../services/sarvamTTS';
+import { getStreamingResponse, resetChat } from '../services/gemini';
+import { sarvamSynthesizeSpeech, sarvamStreamTTS } from '../services/sarvamTTS';
 
 interface TwilioMediaMessage {
   event: 'connected' | 'start' | 'media' | 'stop';
@@ -10,7 +10,7 @@ interface TwilioMediaMessage {
   stop?: { accountSid: string; callSid: string };
 }
 
-const GREETING_TEXT = "Hey! I'm Simran, your personal trainer. Aap kaise hain? How can I help you today?";
+const GREETING_TEXT = "Hi! I'm Simran, your personal fitness coach. How can I help you today?";
 const GREETING_LANG = 'en-IN';
 
 // ── Pre-cache greeting at server start ──
@@ -29,19 +29,21 @@ export async function preGenerateGreeting(): Promise<void> {
 
 /**
  * handleMediaStream
- * Orchestrates the full AI pipeline using ONLY Sarvam AI for both STT and TTS:
- *   Twilio audio → Sarvam STT (REST, chunked) → Gemini AI → Sarvam TTS → Twilio audio
+ * Twilio audio → Sarvam STT → Gemini AI → Sarvam Streaming TTS → Twilio
  *
- * Auto-detects Hindi/English and responds in the same language.
+ * TTS now streams: audio chunks are forwarded to Twilio AS THEY ARRIVE
+ * from Sarvam's WebSocket, instead of waiting for the full audio.
  */
 function handleMediaStream(twilioWs: WebSocket): void {
   console.log('\n🔗 New call connected – AI pipeline starting');
+  resetChat();
 
   let streamSid: string | null = null;
   let isProcessing = false;
   let audioQueue: Promise<void> = Promise.resolve();
+  let greetingSent = false;
 
-  // ── Sarvam STT session (chunked REST with VAD) ──────────
+  // ── Sarvam STT session ──────────────────────────────────
   const sttSession = createSarvamSTTSession(async (transcript: string, detectedLang: string) => {
     if (!transcript.trim() || isProcessing) return;
 
@@ -55,13 +57,13 @@ function handleMediaStream(twilioWs: WebSocket): void {
         for await (const chunk of getStreamingResponse(transcript, detectedLang)) {
           buffer += chunk;
 
-          // Stream TTS sentence-by-sentence (Hindi + English punctuation)
+          // Stream TTS sentence-by-sentence
           if (/[.!?।]/.test(buffer)) {
             const sentence = buffer.trim();
             buffer = '';
             if (sentence) {
               console.log(`🤖 AI [${detectedLang}]: "${sentence}"`);
-              await sendTextAsAudio(sentence, twilioWs, streamSid, detectedLang);
+              await streamTTSToTwilio(sentence, detectedLang, twilioWs, streamSid, sttSession);
             }
           }
         }
@@ -69,7 +71,7 @@ function handleMediaStream(twilioWs: WebSocket): void {
         // Flush trailing text
         if (buffer.trim()) {
           console.log(`🤖 AI (flush) [${detectedLang}]: "${buffer.trim()}"`);
-          await sendTextAsAudio(buffer.trim(), twilioWs, streamSid, detectedLang);
+          await streamTTSToTwilio(buffer.trim(), detectedLang, twilioWs, streamSid, sttSession);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -93,7 +95,10 @@ function handleMediaStream(twilioWs: WebSocket): void {
         case 'start':
           streamSid = msg.start?.streamSid ?? null;
           console.log(`▶️  Stream SID: ${streamSid}`);
-          greetCaller(twilioWs, streamSid);
+          if (!greetingSent) {
+            greetingSent = true;
+            greetCaller(twilioWs, streamSid, sttSession);
+          }
           break;
 
         case 'media':
@@ -123,50 +128,83 @@ function handleMediaStream(twilioWs: WebSocket): void {
   });
 }
 
+// ── Stream TTS audio to Twilio progressively ──────────────────────
+function streamTTSToTwilio(
+  text: string,
+  language: string,
+  twilioWs: WebSocket,
+  streamSid: string | null,
+  sttSession: { mute: (ms: number) => void }
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let totalBytesSent = 0;
+
+    // Mute STT immediately — we'll extend the mute time as audio comes in
+    sttSession.mute(3000);
+
+    sarvamStreamTTS({
+      text,
+      language,
+      onAudioChunk: (chunk) => {
+        // Forward each audio chunk directly to Twilio as it arrives!
+        if (twilioWs.readyState === WebSocket.OPEN && streamSid) {
+          twilioWs.send(
+            JSON.stringify({
+              event: 'media',
+              streamSid,
+              media: { payload: chunk.toString('base64') },
+            }),
+            (err) => { if (err) console.error('❌ ws.send error:', err.message); }
+          );
+          totalBytesSent += chunk.length;
+
+          // Extend mute for the duration of audio being played
+          sttSession.mute(Math.ceil(totalBytesSent / 8000) * 1000 + 1000);
+        }
+      },
+      onDone: () => {
+        console.log(`🔊 Streamed ${totalBytesSent}B to Twilio (~${(totalBytesSent / 8000).toFixed(1)}s)`);
+        resolve();
+      },
+      onError: (err) => {
+        console.error('❌ TTS stream error:', err.message);
+        // Fallback: resolve anyway so pipeline continues
+        resolve();
+      },
+    });
+  });
+}
+
 // ── Greet caller ──────────────────────────────────────────────────
-async function greetCaller(twilioWs: WebSocket, streamSid: string | null): Promise<void> {
+async function greetCaller(
+  twilioWs: WebSocket,
+  streamSid: string | null,
+  sttSession: { mute: (ms: number) => void }
+): Promise<void> {
   console.log(`👋 Sending greeting (cache: ${cachedGreetingAudio ? 'HIT' : 'MISS'})`);
 
+  let audioToSend: Buffer;
+
   if (cachedGreetingAudio) {
-    sendBufferToTwilio(cachedGreetingAudio, twilioWs, streamSid);
+    audioToSend = cachedGreetingAudio;
   } else {
-    await sendTextAsAudio(GREETING_TEXT, twilioWs, streamSid, GREETING_LANG);
+    audioToSend = await sarvamSynthesizeSpeech(GREETING_TEXT, GREETING_LANG);
   }
+
+  const durationMs = Math.ceil(audioToSend.length / 8000) * 1000 + 1500;
+  sttSession.mute(durationMs);
+  sendBufferToTwilio(audioToSend, twilioWs, streamSid);
 }
 
-// ── TTS → audio → Twilio ─────────────────────────────────────────
-async function sendTextAsAudio(
-  text: string,
-  ws: WebSocket,
-  streamSid: string | null,
-  language: string
-): Promise<void> {
-  try {
-    const audioBuffer = await sarvamSynthesizeSpeech(text, language);
-    sendBufferToTwilio(audioBuffer, ws, streamSid);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('❌ TTS error:', message);
-  }
-}
-
-// ── Send raw µ-law buffer to Twilio in chunks ────────────────────
+// ── Send pre-built buffer to Twilio (for cached greeting) ────────
 function sendBufferToTwilio(
   audioBuffer: Buffer,
   ws: WebSocket,
   streamSid: string | null
 ): void {
-  if (ws.readyState !== WebSocket.OPEN) {
-    console.warn('⚠️  WebSocket not open – skipping audio');
-    return;
-  }
-  if (!streamSid) {
-    console.warn('⚠️  No streamSid – skipping audio');
-    return;
-  }
+  if (ws.readyState !== WebSocket.OPEN || !streamSid) return;
 
-  const CHUNK = 8000; // 1-second chunks
-
+  const CHUNK = 8000;
   for (let offset = 0; offset < audioBuffer.length; offset += CHUNK) {
     const slice = audioBuffer.subarray(offset, offset + CHUNK);
     ws.send(
@@ -174,7 +212,6 @@ function sendBufferToTwilio(
       (err) => { if (err) console.error('❌ ws.send error:', err.message); }
     );
   }
-
   console.log(`🔊 Audio sent: ${audioBuffer.length} bytes in ${Math.ceil(audioBuffer.length / CHUNK)} chunk(s)`);
 }
 
