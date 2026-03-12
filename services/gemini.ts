@@ -3,6 +3,15 @@ import { GoogleGenerativeAI, GenerativeModel, ChatSession } from '@google/genera
 let _model: GenerativeModel | null = null;
 let _chat: ChatSession | null = null;
 
+/** Map language codes to human-readable names for Gemini hints */
+const LANG_NAMES: Record<string, { name: string; script: string }> = {
+  'hi': { name: 'Hindi', script: 'Devanagari' },
+  'mr': { name: 'Marathi', script: 'Devanagari' },
+  'bn': { name: 'Bengali', script: 'Bengali' },
+  'gu': { name: 'Gujarati', script: 'Gujarati' },
+  'en': { name: 'English', script: 'Latin' },
+};
+
 function getModel(): GenerativeModel {
   if (!_model) {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
@@ -17,10 +26,14 @@ function getModel(): GenerativeModel {
         '- You are warm, supportive, and professional — not overly casual or repetitive.',
         '',
         'LANGUAGE RULES (CRITICAL):',
-        '- You are fluent in Hindi and English.',
+        '- You are multilingual. You speak Hindi, English, Marathi, Bengali, and Gujarati fluently.',
+        '- ALWAYS respond in the SAME language the user is speaking.',
         '- If the user speaks Hindi, respond ONLY in Hindi (Devanagari script).',
         '- If the user speaks English, respond ONLY in English.',
-        '- If the user mixes Hindi and English, match their style.',
+        '- If the user speaks Marathi, respond ONLY in Marathi (Devanagari script).',
+        '- If the user speaks Bengali, respond ONLY in Bengali (Bengali script).',
+        '- If the user speaks Gujarati, respond ONLY in Gujarati (Gujarati script).',
+        '- If the user code-mixes languages, match their mixed style.',
         '- NEVER switch languages unless the user does first.',
         '',
         'RESPONSE QUALITY RULES:',
@@ -51,15 +64,39 @@ function getModel(): GenerativeModel {
 
 /**
  * Get or create a persistent chat session.
- * This maintains conversation history so Gemini remembers context.
  */
 function getChat(): ChatSession {
   if (!_chat) {
-    _chat = getModel().startChat({
-      history: [],
-    });
+    _chat = getModel().startChat({ history: [] });
   }
   return _chat;
+}
+
+/**
+ * Build a language hint for Gemini based on the detected language code.
+ */
+function buildLangHint(detectedLang: string): string {
+  const prefix = detectedLang.split('-')[0].toLowerCase();
+  const info = LANG_NAMES[prefix];
+
+  if (info) {
+    return `[User spoke in ${info.name}. Respond ONLY in ${info.name} using ${info.script} script.]`;
+  }
+  return '[User spoke in English. Respond in English only.]';
+}
+
+/**
+ * Build a localized error message for the detected language.
+ */
+function getErrorMessage(detectedLang: string): string {
+  const prefix = detectedLang.split('-')[0].toLowerCase();
+  switch (prefix) {
+    case 'hi': return 'क्षमा करें, एक तकनीकी समस्या हुई। कृपया दोबारा कहें।';
+    case 'mr': return 'क्षमा करा, एक तांत्रिक समस्या आली. कृपया पुन्हा सांगा.';
+    case 'bn': return 'দুঃখিত, একটি প্রযুক্তিগত সমস্যা হয়েছে। অনুগ্রহ করে আবার বলুন।';
+    case 'gu': return 'માફ કરશો, એક ટેકનિકલ સમસ્યા આવી. કૃપા કરીને ફરીથી કહો.';
+    default:   return "Sorry, I had a brief issue. Could you repeat that?";
+  }
 }
 
 /**
@@ -73,12 +110,7 @@ export async function* getStreamingResponse(
 ): AsyncGenerator<string, void, unknown> {
   try {
     const chat = getChat();
-
-    // Prepend a language hint
-    const langHint = detectedLang.startsWith('hi')
-      ? '[User spoke in Hindi. Respond in Hindi only.]'
-      : '[User spoke in English. Respond in English only.]';
-
+    const langHint = buildLangHint(detectedLang);
     const prompt = `${langHint}\n${userMessage}`;
     const result = await chat.sendMessageStream(prompt);
 
@@ -89,15 +121,8 @@ export async function* getStreamingResponse(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('❌ Gemini API error:', message);
-
-    // Reset chat on error to avoid poisoned history
     _chat = null;
-
-    if (detectedLang.startsWith('hi')) {
-      yield 'क्षमा करें, एक तकनीकी समस्या हुई। कृपया दोबारा कहें।';
-    } else {
-      yield "Sorry, I had a brief issue. Could you repeat that?";
-    }
+    yield getErrorMessage(detectedLang);
   }
 }
 
