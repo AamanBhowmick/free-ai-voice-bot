@@ -36,11 +36,12 @@ new-call-bot/
 ├── routes/
 │   └── incomingCall.ts         # Twilio webhook → TwiML response
 ├── handlers/
-│   └── mediaStream.ts          # Pipeline orchestration + barge-in
+│   └── mediaStream.ts          # Pipeline orchestration + barge-in + turn detection
 ├── services/
 │   ├── sarvamSTT.ts            # Sarvam REST STT with VAD
 │   ├── sarvamTTS.ts            # Sarvam WebSocket streaming TTS
-│   └── gemini.ts               # Gemini chat session (multi-turn)
+│   ├── gemini.ts               # Gemini chat session (multi-turn)
+│   └── turnDetector.ts         # Semantic turn detection (heuristic + AI)
 ├── client/                     # React frontend (Vite)
 ├── .env                        # API keys and config
 └── package.json
@@ -56,7 +57,7 @@ The STT uses **voice activity detection (VAD)** to accumulate audio and detect s
 
 - **Audio Input:** µ-law 8kHz from Twilio → decoded to PCM Int16LE
 - **Speech Detection:** RMS amplitude > 150 threshold
-- **Silence Detection:** 8 consecutive silent frames (~1s) triggers flush
+- **Silence Detection:** 4 consecutive silent frames (~0.5s) triggers flush — turn detector decides if user is done
 - **API Call:** Accumulated PCM → WAV file → Sarvam REST STT (`saaras:v3`)
 - **Language Detection:** `language_code: 'unknown'` enables auto detection of Hindi, English, Marathi, Bengali, Gujarati, and other Indian languages
 

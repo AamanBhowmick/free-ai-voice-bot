@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import { createSarvamSTTSession } from '../services/sarvamSTT';
 import { getStreamingResponse, resetChat } from '../services/gemini';
 import { sarvamSynthesizeSpeech, sarvamStreamTTS, TTSHandle } from '../services/sarvamTTS';
+import { detectTurn, TurnResult } from '../services/turnDetector';
 
 interface TwilioMediaMessage {
   event: 'connected' | 'start' | 'media' | 'stop';
@@ -27,16 +28,6 @@ export async function preGenerateGreeting(): Promise<void> {
   }
 }
 
-/**
- * handleMediaStream
- * Full AI pipeline with barge-in support:
- *   Twilio → Sarvam STT → Gemini → Sarvam TTS (streaming) → Twilio
- *
- * If the user speaks while the bot is talking:
- *   1. TTS WebSocket is cancelled mid-stream
- *   2. Twilio audio queue is cleared
- *   3. New user speech is processed immediately
- */
 function handleMediaStream(twilioWs: WebSocket): void {
   console.log('\n🔗 New call connected – AI pipeline starting');
   resetChat();
@@ -44,102 +35,155 @@ function handleMediaStream(twilioWs: WebSocket): void {
   let streamSid: string | null = null;
   let greetingSent = false;
 
-  // Barge-in state
+  // ── Generation counter: prevents overlapping responses ──
+  // Each processTurn gets a unique generation ID.
+  // If a barge-in happens, the generation increments,
+  // and all operations from the old generation silently abort.
+  let currentGeneration = 0;
   let currentTTSHandle: TTSHandle | null = null;
-  let interrupted = false;
-  let processingPromise: Promise<void> | null = null;
   let isProcessing = false;
 
-  // ── Interrupt handler: cancel everything when user barges in ──
-  function handleInterrupt() {
-    console.log('🛑 INTERRUPT: Cancelling bot speech...');
-    interrupted = true;
+  // ── Turn detection buffer ───────────────────────────────
+  let turnBuffer = '';
+  let turnLang = 'en-IN';
+  let turnTimeout: ReturnType<typeof setTimeout> | null = null;
+  const TURN_HARD_TIMEOUT_MS = 2000;
+
+  function clearTurnTimeout() {
+    if (turnTimeout) {
+      clearTimeout(turnTimeout);
+      turnTimeout = null;
+    }
+  }
+
+  // ── Cancel everything from the current generation ───────
+  function cancelCurrentGeneration() {
+    currentGeneration++;
     isProcessing = false;
 
-    // 1. Cancel current TTS stream
+    // Cancel TTS
     if (currentTTSHandle) {
       currentTTSHandle.cancel();
       currentTTSHandle = null;
     }
 
-    // 2. Clear Twilio's audio queue so user hears silence immediately
+    // Clear Twilio audio queue
     if (twilioWs.readyState === WebSocket.OPEN && streamSid) {
       twilioWs.send(JSON.stringify({ event: 'clear', streamSid }));
       console.log('🧹 Twilio audio queue cleared');
     }
 
-    // 3. Tell STT to start listening for new speech
+    // Clear turn buffer
+    turnBuffer = '';
+    clearTurnTimeout();
+
     sttSession.setBotSpeaking(false);
   }
 
-  // ── Sarvam STT session with barge-in ────────────────────
+  // ── Process a complete turn ─────────────────────────────
+  async function processTurn(text: string, lang: string) {
+    if (!text.trim()) return;
+
+    // Cancel any in-flight work from a previous turn
+    if (isProcessing) {
+      console.log('🛑 Cancelling previous generation for new turn');
+      cancelCurrentGeneration();
+    }
+
+    const myGeneration = ++currentGeneration;
+    isProcessing = true;
+
+    console.log(`\n🎯 Turn #${myGeneration} [${lang}]: "${text}"`);
+
+    try {
+      let buffer = '';
+
+      for await (const chunk of getStreamingResponse(text, lang)) {
+        // Abort if this generation was superseded
+        if (myGeneration !== currentGeneration) {
+          console.log(`⏹️  Gen #${myGeneration} cancelled (superseded by #${currentGeneration})`);
+          return;
+        }
+
+        buffer += chunk;
+
+        if (/[.!?।]/.test(buffer)) {
+          const sentence = buffer.trim();
+          buffer = '';
+          if (sentence && myGeneration === currentGeneration) {
+            console.log(`🤖 AI [${lang}]: "${sentence}"`);
+            sttSession.setBotSpeaking(true);
+            await streamTTSToTwilio(sentence, lang, myGeneration);
+            if (myGeneration !== currentGeneration) return;
+            sttSession.setBotSpeaking(false);
+          }
+        }
+      }
+
+      // Flush trailing text
+      if (buffer.trim() && myGeneration === currentGeneration) {
+        console.log(`🤖 AI (flush) [${lang}]: "${buffer.trim()}"`);
+        sttSession.setBotSpeaking(true);
+        await streamTTSToTwilio(buffer.trim(), lang, myGeneration);
+        if (myGeneration !== currentGeneration) return;
+        sttSession.setBotSpeaking(false);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (myGeneration === currentGeneration) {
+        console.error('❌ Pipeline error:', msg);
+      }
+    } finally {
+      if (myGeneration === currentGeneration) {
+        isProcessing = false;
+        sttSession.setBotSpeaking(false);
+      }
+    }
+  }
+
+  // ── STT session with turn detection + barge-in ──────────
   const sttSession = createSarvamSTTSession(
     // onTranscript
     async (transcript: string, detectedLang: string) => {
       if (!transcript.trim()) return;
 
-      // If we're still processing and get a new transcript, it's a barge-in follow-up
-      if (isProcessing) {
-        handleInterrupt();
-        // Small delay to let cancellation complete
-        await new Promise(r => setTimeout(r, 100));
-      }
+      // Accumulate into turn buffer
+      turnBuffer = turnBuffer ? `${turnBuffer} ${transcript}` : transcript;
+      turnLang = detectedLang;
 
-      console.log(`\n👤 Caller said [${detectedLang}]: "${transcript}"`);
-      isProcessing = true;
-      interrupted = false;
+      console.log(`📝 STT chunk [${detectedLang}]: "${transcript}"`);
+      clearTurnTimeout();
 
-      try {
-        let buffer = '';
+      // Run turn detector
+      const result = await detectTurn(turnBuffer);
 
-        for await (const chunk of getStreamingResponse(transcript, detectedLang)) {
-          // Check if we were interrupted mid-generation
-          if (interrupted) {
-            console.log('⏹️  AI generation cancelled (barge-in)');
-            break;
+      if (result === TurnResult.COMPLETE) {
+        const fullText = turnBuffer;
+        const lang = turnLang;
+        turnBuffer = '';
+        clearTurnTimeout();
+        processTurn(fullText, lang);
+      } else {
+        console.log(`⏳ Waiting for more speech... (buffer: "${turnBuffer.slice(0, 50)}")`);
+        turnTimeout = setTimeout(() => {
+          if (turnBuffer.trim()) {
+            console.log('⏰ Turn timeout — forcing completion');
+            const fullText = turnBuffer;
+            const lang = turnLang;
+            turnBuffer = '';
+            processTurn(fullText, lang);
           }
-
-          buffer += chunk;
-
-          // Stream TTS sentence-by-sentence
-          if (/[.!?।]/.test(buffer)) {
-            const sentence = buffer.trim();
-            buffer = '';
-            if (sentence && !interrupted) {
-              console.log(`🤖 AI [${detectedLang}]: "${sentence}"`);
-              sttSession.setBotSpeaking(true);
-              await streamTTSToTwilio(sentence, detectedLang, twilioWs, streamSid);
-              if (!interrupted) {
-                sttSession.setBotSpeaking(false);
-              }
-            }
-          }
-        }
-
-        // Flush trailing text
-        if (buffer.trim() && !interrupted) {
-          console.log(`🤖 AI (flush) [${detectedLang}]: "${buffer.trim()}"`);
-          sttSession.setBotSpeaking(true);
-          await streamTTSToTwilio(buffer.trim(), detectedLang, twilioWs, streamSid);
-          if (!interrupted) {
-            sttSession.setBotSpeaking(false);
-          }
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!interrupted) console.error('❌ Pipeline error:', msg);
-      } finally {
-        if (!interrupted) {
-          isProcessing = false;
-          sttSession.setBotSpeaking(false);
-        }
+        }, TURN_HARD_TIMEOUT_MS);
       }
     },
-    // onInterrupt (barge-in callback)
-    handleInterrupt
+    // onInterrupt (barge-in)
+    () => {
+      console.log('🗣️  BARGE-IN: User is interrupting!');
+      cancelCurrentGeneration();
+    }
   );
 
-  // ── Handle Twilio WebSocket messages ─────────────────────
+  // ── Twilio messages ─────────────────────────────────────
   twilioWs.on('message', (rawData: Buffer | string) => {
     try {
       const msg: TwilioMediaMessage = JSON.parse(rawData.toString());
@@ -160,8 +204,7 @@ function handleMediaStream(twilioWs: WebSocket): void {
 
         case 'media':
           if (msg.media?.track === 'inbound') {
-            const audioBuffer = Buffer.from(msg.media.payload, 'base64');
-            sttSession.send(audioBuffer);
+            sttSession.send(Buffer.from(msg.media.payload, 'base64'));
           }
           break;
 
@@ -177,6 +220,7 @@ function handleMediaStream(twilioWs: WebSocket): void {
 
   twilioWs.on('close', () => {
     console.log('🔌 Call ended – WebSocket closed\n');
+    clearTurnTimeout();
     sttSession.close();
   });
 
@@ -184,26 +228,29 @@ function handleMediaStream(twilioWs: WebSocket): void {
     console.error('❌ Twilio WS error:', err.message);
   });
 
-  // ── Stream TTS to Twilio (with barge-in cancel support) ─────────
+  // ── Stream TTS to Twilio (generation-aware) ─────────────
   function streamTTSToTwilio(
     text: string,
     language: string,
-    ws: WebSocket,
-    sid: string | null,
+    generation: number,
   ): Promise<void> {
     return new Promise((resolve) => {
+      // Already cancelled before we even start
+      if (generation !== currentGeneration) { resolve(); return; }
+
       let totalBytesSent = 0;
 
       const handle = sarvamStreamTTS({
         text,
         language,
         onAudioChunk: (chunk) => {
-          if (interrupted) return;
-          if (ws.readyState === WebSocket.OPEN && sid) {
-            ws.send(
+          // Check generation on EVERY chunk
+          if (generation !== currentGeneration) return;
+          if (twilioWs.readyState === WebSocket.OPEN && streamSid) {
+            twilioWs.send(
               JSON.stringify({
                 event: 'media',
-                streamSid: sid,
+                streamSid,
                 media: { payload: chunk.toString('base64') },
               }),
               (err) => { if (err) console.error('❌ ws.send error:', err.message); }
@@ -212,24 +259,28 @@ function handleMediaStream(twilioWs: WebSocket): void {
           }
         },
         onDone: () => {
-          if (!interrupted) {
+          if (generation === currentGeneration) {
             console.log(`🔊 Streamed ${totalBytesSent}B (~${(totalBytesSent / 8000).toFixed(1)}s)`);
           }
           resolve();
         },
         onError: (err) => {
-          if (!interrupted) console.error('❌ TTS error:', err.message);
+          if (generation === currentGeneration) console.error('❌ TTS error:', err.message);
           resolve();
         },
       });
 
       // Store handle so barge-in can cancel it
-      currentTTSHandle = handle;
+      if (generation === currentGeneration) {
+        currentTTSHandle = handle;
+      } else {
+        handle.cancel();
+      }
     });
   }
 }
 
-// ── Greet caller ──────────────────────────────────────────────────
+// ── Greet caller ──────────────────────────────────────────
 async function greetCaller(
   twilioWs: WebSocket,
   streamSid: string | null,
@@ -246,26 +297,17 @@ async function greetCaller(
 
   const durationMs = Math.ceil(audioToSend.length / 8000) * 1000 + 1500;
   sttSession.mute(durationMs);
-  sendBufferToTwilio(audioToSend, twilioWs, streamSid);
-}
 
-// ── Send pre-built buffer to Twilio ──────────────────────────────
-function sendBufferToTwilio(
-  audioBuffer: Buffer,
-  ws: WebSocket,
-  streamSid: string | null
-): void {
-  if (ws.readyState !== WebSocket.OPEN || !streamSid) return;
-
+  if (twilioWs.readyState !== WebSocket.OPEN || !streamSid) return;
   const CHUNK = 8000;
-  for (let offset = 0; offset < audioBuffer.length; offset += CHUNK) {
-    const slice = audioBuffer.subarray(offset, offset + CHUNK);
-    ws.send(
+  for (let offset = 0; offset < audioToSend.length; offset += CHUNK) {
+    const slice = audioToSend.subarray(offset, offset + CHUNK);
+    twilioWs.send(
       JSON.stringify({ event: 'media', streamSid, media: { payload: slice.toString('base64') } }),
       (err) => { if (err) console.error('❌ ws.send error:', err.message); }
     );
   }
-  console.log(`🔊 Audio sent: ${audioBuffer.length} bytes in ${Math.ceil(audioBuffer.length / CHUNK)} chunk(s)`);
+  console.log(`🔊 Greeting sent: ${audioToSend.length} bytes`);
 }
 
 export default handleMediaStream;

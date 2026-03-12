@@ -102,13 +102,13 @@ export function createSarvamSTTSession(
   let botSpeaking = false;
   let bargeInFrames = 0;
 
-  // Tuning constants
-  const SILENCE_THRESHOLD = 150;
-  const SILENCE_FRAMES_NEEDED = 8;   // ~1s for user to finish
-  const MIN_SPEECH_BYTES = 3200;
+  // Tuning constants — tuned to reject background speech
+  const SILENCE_THRESHOLD = 600;     // Only direct speech into mic triggers (background chatter ~200-500)
+  const SILENCE_FRAMES_NEEDED = 4;   // ~0.5s — quick flush, turn detector decides if complete
+  const MIN_SPEECH_BYTES = 12800;    // minimum ~0.8s of speech to process (rejects short noise)
   const MAX_SPEECH_BYTES = 240000;
-  const BARGE_IN_THRESHOLD = 250;    // Higher threshold for barge-in (must speak clearly)
-  const BARGE_IN_FRAMES = 3;         // ~0.4s of loud speech = definite barge-in
+  const BARGE_IN_THRESHOLD = 700;    // Must speak clearly and directly to interrupt
+  const BARGE_IN_FRAMES = 4;         // ~0.5s of loud speech = definite barge-in
 
   function processAudio(mulawBuffer: Buffer): void {
     if (closed) return;
