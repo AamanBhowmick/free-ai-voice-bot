@@ -1,5 +1,6 @@
 import { SarvamAIClient } from 'sarvamai';
 import { Readable } from 'stream';
+import { detectVoice } from './webrtcVAD';
 
 type TranscriptCallback = (transcript: string, detectedLanguage: string) => void;
 type InterruptCallback = () => void;
@@ -179,6 +180,16 @@ export function createSarvamSTTSession(
     speechDetected = false;
 
     const duration = (pcmData.length / (8000 * 2)).toFixed(1);
+
+    // ── WebRTC VAD Filter ──
+    const vad = detectVoice(pcmData, { aggressiveness: 3 });
+    console.log(vad.detail);
+    if (!vad.isSpeech) {
+      console.log(`🔇 VAD: Rejected background noise (~${duration}s)`);
+      isProcessing = false;
+      return;
+    }
+
     console.log(`🎤 Sending ${pcmData.length}B (~${duration}s) to Sarvam STT...`);
 
     try {
