@@ -6,9 +6,11 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 
-import incomingCallRoute from './routes/incomingCall';
+// ── Single import from the portable core module ────────────────────
+import { handleMediaStream, incomingCallRoute, preGenerateGreeting } from './core';
+
+// ── API route (health check, call initiation) ──────────────────────
 import apiRoute from './routes/api';
-import handleMediaStream, { preGenerateGreeting } from './handlers/mediaStream';
 
 const app: Application = express();
 
@@ -40,7 +42,7 @@ server.listen(PORT, () => {
   console.log('');
   console.log('╔════════════════════════════════════════╗');
   console.log('║       🤖 AI Call Bot Server (TS)       ║');
-  console.log(`║       Port: ${PORT}                        ║`);
+  console.log(`║       Port: ${PORT}                       ║`);
   console.log('╚════════════════════════════════════════╝');
   console.log('');
   console.log(`🌐 Public URL  : ${process.env.PUBLIC_URL ?? 'NOT SET – run ngrok first'}`);
