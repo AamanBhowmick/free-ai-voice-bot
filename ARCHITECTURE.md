@@ -38,8 +38,9 @@ new-call-bot/
 ├── handlers/
 │   └── mediaStream.ts          # Pipeline orchestration + barge-in + turn detection
 ├── services/
-│   ├── sarvamSTT.ts            # Sarvam REST STT with VAD
+│   ├── sarvamSTT.ts            # Sarvam REST STT with Silero VAD pre-filter
 │   ├── sarvamTTS.ts            # Sarvam WebSocket streaming TTS
+│   ├── sileroVAD.ts            # Neural net Voice Activity Detection
 │   ├── gemini.ts               # Gemini chat session (multi-turn)
 │   └── turnDetector.ts         # Semantic turn detection (heuristic + AI)
 ├── client/                     # React frontend (Vite)
@@ -56,8 +57,9 @@ new-call-bot/
 The STT uses **voice activity detection (VAD)** to accumulate audio and detect speech boundaries:
 
 - **Audio Input:** µ-law 8kHz from Twilio → decoded to PCM Int16LE
-- **Speech Detection:** RMS amplitude > 150 threshold
-- **Silence Detection:** 4 consecutive silent frames (~0.5s) triggers flush — turn detector decides if user is done
+- **Fast Buffering:** RMS amplitude > 300 to start accumulating audio
+- **Noise Rejection (Silero VAD):** Before sending to the STT API, the accumulated buffer is analyzed by the **Silero VAD ONNX model**. If it's just background noise (TV, typing, fan), it's immediately dropped.
+- **Silence Detection:** 4 consecutive silent frames (~0.5s) triggers flush — VAD + turn detector decides what to do
 - **API Call:** Accumulated PCM → WAV file → Sarvam REST STT (`saaras:v3`)
 - **Language Detection:** `language_code: 'unknown'` enables auto detection of Hindi, English, Marathi, Bengali, Gujarati, and other Indian languages
 

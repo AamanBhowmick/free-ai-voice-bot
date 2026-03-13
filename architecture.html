@@ -684,9 +684,9 @@
     <p class="subtitle">End-to-end flow using 100% free-tier services · Setup guide &amp; key locations included</p>
     <div class="stack-pills" style="justify-content:center;margin-top:16px;">
       <span class="pill">📞 Twilio (Free Trial)</span>
-      <span class="pill">🎙️ Deepgram STT</span>
-      <span class="pill">🤖 Google Gemini AI</span>
-      <span class="pill">🔊 ElevenLabs TTS</span>
+      <span class="pill">🎙️ Sarvam AI (STT & TTS)</span>
+      <span class="pill">🤖 Google Gemini Flash</span>
+      <span class="pill">🧠 Silero VAD (Neural Filter)</span>
       <span class="pill">⚡ Node.js / Express</span>
       <span class="pill">🌐 ngrok Tunnel</span>
     </div>
@@ -763,15 +763,15 @@
             <div class="step-bubble">4</div>
             <span class="node-icon">🎙️</span>
             <div class="node-label">Speech → Text</div>
-            <div class="node-title">Deepgram STT</div>
-            <span class="node-service tag-cyan">Free 200 hr/mo</span>
+            <div class="node-title">Sarvam STT + VAD</div>
+            <span class="node-service tag-cyan">REST saaras:v3</span>
           </div>
         </div>
 
         <!-- Arrow Down -->
         <div class="arrow-v">
           <div class="arrow-line-v"></div>
-          <div class="arrow-label">Transcript (JSON)</div>
+          <div class="arrow-label">Batched Transcript</div>
           <div class="arrow-line-v"></div>
           <div class="arrow-head-v"></div>
         </div>
@@ -783,8 +783,8 @@
             <div class="streaming-badge">⚡ Streaming</div>
             <span class="node-icon">🤖</span>
             <div class="node-label">AI Reasoning</div>
-            <div class="node-title">Gemini 2.0 Flash</div>
-            <span class="node-service tag-purple">Free 15 RPM</span>
+            <div class="node-title">Gemini 2.5 Flash</div>
+            <span class="node-service tag-purple">Multi-turn Session</span>
           </div>
         </div>
 
@@ -802,8 +802,8 @@
             <div class="step-bubble">6</div>
             <span class="node-icon">🔊</span>
             <div class="node-label">Text → Speech</div>
-            <div class="node-title">ElevenLabs TTS</div>
-            <span class="node-service tag-yellow">Free 10k chars/mo</span>
+            <div class="node-title">Sarvam TTS</div>
+            <span class="node-service tag-yellow">WS bulbul:v3</span>
           </div>
         </div>
 
@@ -852,9 +852,9 @@
         <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Caller / User</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Twilio Telephony</div>
         <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>Node.js Backend</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#22d3ee"></div>Deepgram STT</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Gemini AI (Streaming)</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>ElevenLabs TTS</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#22d3ee"></div>Sarvam STT + VAD</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Gemini AI 2.5</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Sarvam TTS</div>
       </div>
     </div>
   </section>
@@ -890,25 +890,21 @@
         </div>
       </div>
 
-      <!-- Deepgram -->
-      <div class="service-card">
-        <div class="service-header">
-          <span class="service-icon">🎙️</span>
-          <div>
-            <div class="service-name">Deepgram</div>
-            <div class="service-role">Speech-to-Text · Real-time Streaming</div>
+      <!-- Sarvam AI</div>
+            <div class="service-role">Speech-to-Text &amp; Text-to-Speech (Indic Languages)</div>
           </div>
         </div>
         <p class="service-detail">
-          Highly accurate real-time STT via WebSocket. Supports <code>nova-2</code> model with phone-quality audio, interim results, and punctuation. Perfect for live call processing.
+          Provides top-tier transcription and voice generation tailored for Indian languages (Hindi, Marathi, Bengali, Gujarati, English). Uses <code>saaras:v3</code> for STT and <code>bulbul:v3</code> (Simran voice) for TTS streaming. Include <strong>Silero VAD</strong> to filter background noise locally before calling the API.
         </p>
         <div class="free-tier">
-          <span class="label">Free Tier:</span> $200 credit on signup (~200 hours of audio).<br/>
-          No credit card required for initial API key.
+          <span class="label">API Key:</span> Get it from Sarvam AI platform.<br/>
+          Unified key for both TTS and STT.
         </div>
-        <a class="get-key-btn" href="https://console.deepgram.com/signup" target="_blank">🔑 Get Key → console.deepgram.com/signup</a>
+        <a class="get-key-btn" href="https://sarvam.ai" target="_blank">🔑 Get Key → sarvam.ai</a>
         <div class="step-tags" style="margin-top:10px;">
-          <span class="step-tag t-env">DEEPGRAM_API_KEY</span>
+          <span class="step-tag t-env">SARVAM_API_KEY</span>
+          <span class="step-tag t-env">SARVAM_TTS_SPEAKER</span>
         </div>
       </div>
 
@@ -922,7 +918,7 @@
           </div>
         </div>
         <p class="service-detail">
-          Use <strong>Gemini 2.0 Flash</strong> for fast, streaming text responses. The Node.js SDK supports <code>generateContentStream()</code> which streams tokens back as they're generated — ideal for low-latency TTS.
+          Use <strong>Gemini 2.5 Flash</strong> for fast, streaming text responses. The Node.js SDK supports <code>generateContentStream()</code> which streams tokens back as they're generated — ideal for low-latency TTS.
         </p>
         <div class="free-tier">
           <span class="label">Free Tier:</span> 15 RPM · 1M TPM · 1500 RPD with gemini-2.0-flash.<br/>
@@ -934,26 +930,21 @@
         </div>
       </div>
 
-      <!-- ElevenLabs -->
-      <div class="service-card">
-        <div class="service-header">
-          <span class="service-icon">🔊</span>
-          <div>
-            <div class="service-name">ElevenLabs</div>
-            <div class="service-role">Text-to-Speech · Streaming Audio</div>
+      <!-- Silero VAD</div>
+            <div class="service-role">Neural Network Voice Activity Detection</div>
           </div>
         </div>
         <p class="service-detail">
-          Natural-sounding TTS with streaming support. Use the <strong>Streaming API</strong> to send partial Gemini output and receive audio chunks in real-time before the full response is ready.
+          Industry-standard AI model running entirely locally in Node.js via ONNX runtime. Inspects the Twilio audio buffers to differentiate your actual voice from background noise, typing, fans, or TV. 
         </p>
         <div class="free-tier">
-          <span class="label">Free Tier:</span> 10,000 characters/month.<br/>
-          Supports streaming audio output via HTTP chunked transfer.
+          <span class="label">100% Free & Local:</span> Zero latency, zero API costs.<br/>
+          Prevents garbage audio from being sent to Sarvam STT.
         </div>
-        <a class="get-key-btn" href="https://elevenlabs.io/sign-up" target="_blank">🔑 Get Key → elevenlabs.io/sign-up</a>
+        <a class="get-key-btn" href="https://github.com/ricky0123/vad" target="_blank">📦 GitHub → ricky0123/vad-node</a>
         <div class="step-tags" style="margin-top:10px;">
-          <span class="step-tag t-env">ELEVENLABS_API_KEY</span>
-          <span class="step-tag t-env">ELEVENLABS_VOICE_ID</span>
+          <span class="step-tag t-code">@ricky0123/vad-node</span>
+          <span class="step-tag t-code">onnxruntime-node</span>
         </div>
       </div>
 
@@ -999,7 +990,7 @@
           <span class="step-tag t-code">express</span>
           <span class="step-tag t-code">ws</span>
           <span class="step-tag t-code">@google/generative-ai</span>
-          <span class="step-tag t-code">@deepgram/sdk</span>
+          <span class="step-tag t-code">sarvamai            </span>
         </div>
       </div>
 
@@ -1095,14 +1086,10 @@
             </div>
 
             <div class="substep">
-              <div class="substep-title"><span class="substep-num">C</span> Deepgram — Speech-to-Text API Key</div>
-              <p>1. Go to <a href="https://console.deepgram.com/signup" target="_blank" style="color:var(--accent2)">console.deepgram.com/signup</a> → sign up (no credit card needed).<br/>
-              2. After logging in, you'll be on the Dashboard. Click:</p>
-              <div class="nav-path">API Keys <span>→</span> Create a New API Key</div>
-              <p>3. Give it a name like <span class="ic">call-bot</span>, set permissions to <strong>Member</strong>, click <strong>Create Key</strong>.<br/>
-              4. <strong>Copy the key immediately</strong> — it's only shown once!</p>
-              <div class="cmd-block"><span class="hl">DEEPGRAM_API_KEY</span> = <span class="val">your_deepgram_key_here</span></div>
-              <div class="callout callout-tip">💡 You get $200 free credit (~200 hours of audio transcription). More than enough for a POC.</div>
+              <div class="substep-title"><span class="substep-num">C</span> Sarvam AI — STT & TTS</div>
+              <p>Go to <a href="https://sarvam.ai" target="_blank" style="color:var(--accent2)">sarvam.ai</a> → Get an API key.</p>
+              <div class="cmd-block"><span class="hl">SARVAM_API_KEY</span> = <span class="val">your_sarvam_key_here</span>
+<span class="hl">SARVAM_TTS_SPEAKER</span> = <span class="val">simran</span></div>
             </div>
 
             <div class="substep">
@@ -1120,9 +1107,7 @@
               <p>1. Go to <a href="https://elevenlabs.io/sign-up" target="_blank" style="color:var(--accent2)">elevenlabs.io/sign-up</a> → create a free account.<br/>
               2. After login, click your profile icon (top-right) → <strong>Profile + API Key</strong>.<br/>
               3. Copy the API key shown.</p>
-              <div class="cmd-block"><span class="hl">ELEVENLABS_API_KEY</span> = <span class="val">your_elevenlabs_key</span></div>
-              <p>4. To get a Voice ID: go to <strong>Voices</strong> in the sidebar → click any voice → click the <strong>&lt;/&gt;</strong> icon → copy the Voice ID.</p>
-              <div class="cmd-block"><span class="hl">ELEVENLABS_VOICE_ID</span> = <span class="val">21m00Tcm4TlvDq8ikWAM</span>  <span class="comment-c"># "Rachel" - default free voice</span></div>
+              <div class="cmd-block"></div>
               <div class="callout callout-tip">💡 Free tier = 10,000 characters/month. A typical 5-min call uses ~500 chars — that's 20 full calls per month free.</div>
             </div>
 
@@ -1162,14 +1147,15 @@
             <div class="substep">
               <div class="substep-title"><span class="substep-num">B</span> Install All Dependencies</div>
               <p>Run this single command to install everything you need:</p>
-              <div class="cmd-block"><span class="prompt">$</span> npm install express ws dotenv @google/generative-ai @deepgram/sdk axios</div>
+              <div class="cmd-block"><span class="prompt">$</span> npm install express ws dotenv @google/generative-ai sarvamai @ricky0123/vad-node onnxruntime-node</div>
               <p>What each package does:</p>
               <div class="cmd-block"><span class="val">express</span>            <span class="comment-c">→ Web server (handles HTTP requests from Twilio)</span>
 <span class="val">ws</span>                 <span class="comment-c">→ WebSocket library (for Twilio audio stream)</span>
 <span class="val">dotenv</span>             <span class="comment-c">→ Reads your .env file into process.env</span>
 <span class="val">@google/generative-ai</span> <span class="comment-c">→ Gemini AI SDK (streaming responses)</span>
-<span class="val">@deepgram/sdk</span>      <span class="comment-c">→ Deepgram SDK (speech-to-text)</span>
-<span class="val">axios</span>              <span class="comment-c">→ HTTP client (for ElevenLabs TTS API calls)</span></div>
+<span class="val">sarvamai            </span>      <span class="comment-c">→ Deepgram SDK (speech-to-text)</span>
+<span class="val">@ricky0123/vad-node </span>              <span class="comment-c">→ HTTP client (for ElevenLabs TTS API calls)</span></div>
+onnxruntime-node   </span>              <span class="comment-c">→ HTTP client (for ElevenLabs TTS API calls)</span></div>
             </div>
             <div class="substep">
               <div class="substep-title"><span class="substep-num">C</span> Create the .env File</div>
@@ -1391,7 +1377,7 @@ server.listen(process.env.PORT, () => {
             </div>
             <div class="substep">
               <div class="substep-title"><span class="substep-num">B</span> Initialize Deepgram Connection</div>
-              <div class="cmd-block">const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
+              <div class="cmd-block">const { createClient, LiveTranscriptionEvents } = require('sarvamai            ');
 
 const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
@@ -1519,10 +1505,12 @@ const model = genAI.getGenerativeModel({
             </div>
             <div class="substep">
               <div class="substep-title"><span class="substep-num">B</span> Call ElevenLabs Streaming TTS</div>
-              <div class="cmd-block">const axios = require('axios');
+              <div class="cmd-block">const @ricky0123/vad-node  = require('axios');
+onnxruntime-node    = require('axios');
 
 async function speakToTwilio(text, twilioWs) {
-  const response = await axios({
+  const response = await @ricky0123/vad-node ({
+onnxruntime-node   ({
     method: 'post',
     url: `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}/stream`,
     headers: {
