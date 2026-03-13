@@ -11,7 +11,7 @@ interface TwilioMediaMessage {
   stop?: { accountSid: string; callSid: string };
 }
 
-const GREETING_TEXT = "Hi! I'm Simran, your personal fitness coach. I speak Hindi, English, Marathi, Bengali, Gujarati, Tamil, Telugu, and Malayalam. How can I help you today?";
+const GREETING_TEXT = "Hi! I'm Simran, your insurance advisor. I can help you with policy details, renewals, claims, and coverage options. I speak Hindi, English, Marathi, Bengali, Gujarati, Tamil, Telugu, and Malayalam. How can I assist you today?";
 const GREETING_LANG = 'en-IN';
 
 // ── Pre-cache greeting at server start ──
