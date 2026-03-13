@@ -11,7 +11,7 @@ interface TwilioMediaMessage {
   stop?: { accountSid: string; callSid: string };
 }
 
-const GREETING_TEXT = "Hi! I'm Simran, your personal fitness coach. I speak Hindi, English, Marathi, Bengali, Gujarati, Tamil, Telugu, and Malayalam. How can I help you today?";
+const GREETING_TEXT = "Hi! I'm Simran, your insurance advisor. I can help you with policy details, renewals, claims, and coverage options. I speak Hindi, English, Marathi, Bengali, Gujarati, Tamil, Telugu, and Malayalam. How can I assist you today?";
 const GREETING_LANG = 'en-IN';
 
 // ── Pre-cache greeting at server start ──
@@ -95,6 +95,10 @@ export default function handleMediaStream(twilioWs: WebSocket): void {
     try {
       let buffer = '';
 
+      // Keep bot marked as speaking for the ENTIRE response — no gaps between sentences
+      // This prevents noise from accumulating and disrupting the pipeline
+      sttSession.setBotSpeaking(true);
+
       for await (const chunk of getStreamingResponse(text, lang)) {
         // Abort if this generation was superseded
         if (myGeneration !== currentGeneration) {
@@ -109,10 +113,8 @@ export default function handleMediaStream(twilioWs: WebSocket): void {
           buffer = '';
           if (sentence && myGeneration === currentGeneration) {
             console.log(`🤖 AI [${lang}]: "${sentence}"`);
-            sttSession.setBotSpeaking(true);
             await streamTTSToTwilio(sentence, lang, myGeneration);
             if (myGeneration !== currentGeneration) return;
-            sttSession.setBotSpeaking(false);
           }
         }
       }
@@ -120,10 +122,8 @@ export default function handleMediaStream(twilioWs: WebSocket): void {
       // Flush trailing text
       if (buffer.trim() && myGeneration === currentGeneration) {
         console.log(`🤖 AI (flush) [${lang}]: "${buffer.trim()}"`);
-        sttSession.setBotSpeaking(true);
         await streamTTSToTwilio(buffer.trim(), lang, myGeneration);
         if (myGeneration !== currentGeneration) return;
-        sttSession.setBotSpeaking(false);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -133,7 +133,7 @@ export default function handleMediaStream(twilioWs: WebSocket): void {
     } finally {
       if (myGeneration === currentGeneration) {
         isProcessing = false;
-        sttSession.setBotSpeaking(false);
+        sttSession.setBotSpeaking(false);  // Only release AFTER entire response is done
       }
     }
   }

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 
 /**
  * Semantic Turn Detector
@@ -175,34 +175,43 @@ export function analyzeTurn(transcript: string): TurnResult | null {
 
 // ── Gemini Flash fallback for uncertain cases ───────────────────
 
-let _turnModel: any = null;
+let _turnClient: OpenAI | null = null;
 
-function getTurnModel() {
-  if (!_turnModel) {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
-    _turnModel = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
-      systemInstruction:
-        'You are a turn-detection classifier for a voice call. ' +
-        'Given a transcript snippet, respond with EXACTLY one word: ' +
-        '"COMPLETE" if the user has finished their thought, ' +
-        '"INCOMPLETE" if they are mid-sentence. ' +
-        'Consider Hindi, English, Marathi, Bengali, and Gujarati. ' +
-        'Respond with ONLY "COMPLETE" or "INCOMPLETE".',
+function getTurnClient(): OpenAI {
+  if (!_turnClient) {
+    _turnClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY ?? '',
     });
   }
-  return _turnModel;
+  return _turnClient;
 }
 
 /**
- * analyzeTurnWithAI — Gemini Flash fallback (~200ms)
+ * analyzeTurnWithAI — OpenAI fallback (~200ms)
  * Used only when heuristics return null (uncertain).
  */
 export async function analyzeTurnWithAI(transcript: string): Promise<TurnResult> {
   try {
-    const model = getTurnModel();
-    const result = await model.generateContent(transcript);
-    const response = result.response.text().trim().toUpperCase();
+    const client = getTurnClient();
+    const result = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a turn-detection classifier for a voice call. ' +
+            'Given a transcript snippet, respond with EXACTLY one word: ' +
+            '"COMPLETE" if the user has finished their thought, ' +
+            '"INCOMPLETE" if they are mid-sentence. ' +
+            'Consider Hindi, English, Marathi, Bengali, Gujarati, Tamil, Telugu, and Malayalam. ' +
+            'Respond with ONLY "COMPLETE" or "INCOMPLETE".',
+        },
+        { role: 'user', content: transcript },
+      ],
+      max_tokens: 5,
+    });
+
+    const response = (result.choices[0]?.message?.content ?? '').trim().toUpperCase();
 
     if (response.includes('COMPLETE')) return TurnResult.COMPLETE;
     if (response.includes('INCOMPLETE')) return TurnResult.INCOMPLETE;

@@ -102,6 +102,7 @@ export function createSarvamSTTSession(
   let mutedUntil = 0;
   let botSpeaking = false;
   let bargeInFrames = 0;
+  let bargeInBuffer: Buffer[] = [];     // Accumulate PCM for VAD check
 
   // Tuning constants — tuned to reject background speech
   const SILENCE_THRESHOLD = 600;     // Only direct speech into mic triggers (background chatter ~200-500)
@@ -124,23 +125,37 @@ export function createSarvamSTTSession(
     if (botSpeaking) {
       if (rms > BARGE_IN_THRESHOLD) {
         bargeInFrames++;
+        bargeInBuffer.push(pcmBuffer);
         if (bargeInFrames >= BARGE_IN_FRAMES) {
-          console.log('🗣️  BARGE-IN detected! User is interrupting.');
-          bargeInFrames = 0;
-          botSpeaking = false;
-          isProcessing = false;
+          // Verify it's actual speech, not just noise, using VAD
+          const combinedPcm = Buffer.concat(bargeInBuffer);
+          const vad = detectVoice(combinedPcm, { aggressiveness: 2 });
 
-          // Clear any accumulated audio
-          pcmChunks.length = 0;
-          totalPcmBytes = 0;
-          silenceFrames = 0;
-          speechDetected = false;
+          if (vad.isSpeech) {
+            console.log('🗣️  BARGE-IN detected! User is interrupting.');
+            bargeInFrames = 0;
+            bargeInBuffer = [];
+            botSpeaking = false;
+            isProcessing = false;
 
-          // Fire interrupt callback
-          onInterrupt();
+            // Clear any accumulated audio
+            pcmChunks.length = 0;
+            totalPcmBytes = 0;
+            silenceFrames = 0;
+            speechDetected = false;
+
+            // Fire interrupt callback
+            onInterrupt();
+          } else {
+            // It's noise, not speech — reset and keep playing
+            console.log('🔇 Barge-in rejected (noise, not speech)');
+            bargeInFrames = 0;
+            bargeInBuffer = [];
+          }
         }
       } else {
         bargeInFrames = 0;
+        bargeInBuffer = [];
       }
       return; // Don't accumulate audio while bot is speaking
     }
