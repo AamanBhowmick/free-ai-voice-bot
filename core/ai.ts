@@ -9,6 +9,9 @@ const LANG_NAMES: Record<string, { name: string; script: string }> = {
   'mr': { name: 'Marathi', script: 'Devanagari' },
   'bn': { name: 'Bengali', script: 'Bengali' },
   'gu': { name: 'Gujarati', script: 'Gujarati' },
+  'ta': { name: 'Tamil', script: 'Tamil' },
+  'te': { name: 'Telugu', script: 'Telugu' },
+  'ml': { name: 'Malayalam', script: 'Malayalam' },
   'en': { name: 'English', script: 'Latin' },
 };
 
@@ -26,13 +29,16 @@ function getModel(): GenerativeModel {
         '- You are warm, supportive, and professional — not overly casual or repetitive.',
         '',
         'LANGUAGE RULES (CRITICAL):',
-        '- You are multilingual. You speak Hindi, English, Marathi, Bengali, and Gujarati fluently.',
+        '- You are multilingual. You speak Hindi, English, Marathi, Bengali, Gujarati, Tamil, Telugu, and Malayalam fluently.',
         '- ALWAYS respond in the SAME language the user is speaking.',
         '- If the user speaks Hindi, respond ONLY in Hindi (Devanagari script).',
         '- If the user speaks English, respond ONLY in English.',
         '- If the user speaks Marathi, respond ONLY in Marathi (Devanagari script).',
         '- If the user speaks Bengali, respond ONLY in Bengali (Bengali script).',
         '- If the user speaks Gujarati, respond ONLY in Gujarati (Gujarati script).',
+        '- If the user speaks Tamil, respond ONLY in Tamil (Tamil script).',
+        '- If the user speaks Telugu, respond ONLY in Telugu (Telugu script).',
+        '- If the user speaks Malayalam, respond ONLY in Malayalam (Malayalam script).',
         '- If the user code-mixes languages, match their mixed style.',
         '- NEVER switch languages unless the user does first.',
         '',
@@ -95,6 +101,9 @@ function getErrorMessage(detectedLang: string): string {
     case 'mr': return 'क्षमा करा, एक तांत्रिक समस्या आली. कृपया पुन्हा सांगा.';
     case 'bn': return 'দুঃখিত, একটি প্রযুক্তিগত সমস্যা হয়েছে। অনুগ্রহ করে আবার বলুন।';
     case 'gu': return 'માફ કરશો, એક ટેકનિકલ સમસ્યા આવી. કૃપા કરીને ફરીથી કહો.';
+    case 'ta': return 'மன்னிக்கவும், ஒரு தொழில்நுட்ப சிக்கல் ஏற்பட்டது. தயவுசெய்து மீண்டும் சொல்லுங்கள்.';
+    case 'te': return 'క్షమించండి, ఒక సాంకేతిక సమస్య ఏర్పడింది. దయచేసి మళ్ళీ చెప్పండి.';
+    case 'ml': return 'ക്ഷമിക്കണം, ഒരു സാങ്കേതിക പ്രശ്നം ഉണ്ടായി. ദയവായി വീണ്ടും പറയൂ.';
     default:   return "Sorry, I had a brief issue. Could you repeat that?";
   }
 }

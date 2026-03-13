@@ -50,6 +50,24 @@ const GU_TRAILING = new Set([
   'હું', 'અમે', 'તમે', 'તે', 'આ', 'એ', 'માં', 'પર', 'ને', 'છે',
 ]);
 
+// Tamil
+const TA_TRAILING = new Set([
+  'மற்றும்', 'ஆனால்', 'அல்லது', 'ஏனென்றால்', 'அதனால்', 'என்று', 'எப்படி',
+  'நான்', 'நாங்கள்', 'நீங்கள்', 'அவர்', 'இது', 'அது', 'என்', 'உன்',
+]);
+
+// Telugu
+const TE_TRAILING = new Set([
+  'మరియు', 'కానీ', 'లేదా', 'ఎందుకంటే', 'అందువల్ల', 'అని', 'ఎలా',
+  'నేను', 'మేము', 'మీరు', 'అతను', 'ఆమె', 'ఇది', 'అది', 'నా', 'మీ',
+]);
+
+// Malayalam
+const ML_TRAILING = new Set([
+  'ഒപ്പം', 'പക്ഷേ', 'അല്ലെങ്കിൽ', 'കാരണം', 'അതുകൊണ്ട്', 'എന്ന്', 'എങ്ങനെ',
+  'ഞാൻ', 'ഞങ്ങൾ', 'നിങ്ങൾ', 'അവൻ', 'അവൾ', 'ഇത്', 'അത്', 'എന്റെ', 'നിന്റെ',
+]);
+
 // ── Sentence-ending punctuation ─────────────────────────────────
 
 const SENTENCE_END = /[.!?।॥\u0964\u0965]$/;
@@ -66,21 +84,33 @@ const QUESTION_WORDS = new Set([
   'কি', 'কেন', 'কখন', 'কোথায়', 'কে', 'কত',
   // Gujarati
   'શું', 'કેવી', 'કેમ', 'ક્યારે', 'ક્યાં', 'કોણ', 'કેટલું',
+  // Tamil
+  'என்ன', 'எப்படி', 'ஏன்', 'எப்போது', 'எங்கே', 'யார்', 'எவ்வளவு',
+  // Telugu
+  'ఏమిటి', 'ఎలా', 'ఎందుకు', 'ఎప్పుడు', 'ఎక్కడ', 'ఎవరు', 'ఎంత',
+  // Malayalam
+  'എന്ത്', 'എങ്ങനെ', 'എന്തുകൊണ്ട്', 'എപ്പോൾ', 'എവിടെ', 'ആര്', 'എത്ര',
 ]);
 
 // ── Detect script ───────────────────────────────────────────────
 
-function detectScript(text: string): 'en' | 'hi' | 'bn' | 'gu' {
+function detectScript(text: string): 'en' | 'hi' | 'bn' | 'gu' | 'ta' | 'te' | 'ml' {
+  if (/[\u0B80-\u0BFF]/.test(text)) return 'ta';       // Tamil script
+  if (/[\u0C00-\u0C7F]/.test(text)) return 'te';       // Telugu script
+  if (/[\u0D00-\u0D7F]/.test(text)) return 'ml';       // Malayalam script
   if (/[\u0980-\u09FF]/.test(text)) return 'bn';       // Bengali script
   if (/[\u0A80-\u0AFF]/.test(text)) return 'gu';       // Gujarati script
   if (/[\u0900-\u097F]/.test(text)) return 'hi';       // Devanagari (Hindi/Marathi)
   return 'en';
 }
 
-function getTrailingSet(script: 'en' | 'hi' | 'bn' | 'gu'): Set<string> {
+function getTrailingSet(script: 'en' | 'hi' | 'bn' | 'gu' | 'ta' | 'te' | 'ml'): Set<string> {
   switch (script) {
     case 'bn': return BN_TRAILING;
     case 'gu': return GU_TRAILING;
+    case 'ta': return TA_TRAILING;
+    case 'te': return TE_TRAILING;
+    case 'ml': return ML_TRAILING;
     case 'hi': return HI_MR_TRAILING;
     default:   return EN_TRAILING;
   }
@@ -114,7 +144,11 @@ export function analyzeTurn(transcript: string): TurnResult | null {
   // Rule 2: Very short (1 word) → likely incomplete unless it's a greeting
   if (wordCount === 1) {
     const greetings = new Set(['hello', 'hi', 'hey', 'haan', 'namaskar', 'namaste',
-      'हाँ', 'नहीं', 'হ্যাঁ', 'না', 'हो', 'नमस्ते', 'হ্যালো', 'હા', 'ના']);
+      'हाँ', 'नहीं', 'হ্যাঁ', 'না', 'हो', 'नमस्ते', 'হ্যালো', 'હા', 'ના',
+      'வணக்கம்', 'ஆமா', 'இல்லை',     // Tamil
+      'నమస్కారం', 'అవును', 'లేదు',     // Telugu
+      'നമസ്കാരം', 'ഉവ്വ്', 'ഇല്ല',       // Malayalam
+    ]);
     if (greetings.has(lastWord)) return TurnResult.COMPLETE;
     return TurnResult.INCOMPLETE;
   }
