@@ -103,14 +103,16 @@ export function createSarvamSTTSession(
   let botSpeaking = false;
   let bargeInFrames = 0;
   let bargeInBuffer: Buffer[] = [];     // Accumulate PCM for VAD check
+  let lastBargeInRejectTime = 0;        // Cooldown after rejected barge-in
 
   // Tuning constants — tuned to reject background speech
   const SILENCE_THRESHOLD = 600;     // Only direct speech into mic triggers (background chatter ~200-500)
   const SILENCE_FRAMES_NEEDED = 4;   // ~0.5s — quick flush, turn detector decides if complete
   const MIN_SPEECH_BYTES = 12800;    // minimum ~0.8s of speech to process (rejects short noise)
   const MAX_SPEECH_BYTES = 240000;
-  const BARGE_IN_THRESHOLD = 700;    // Must speak clearly and directly to interrupt
-  const BARGE_IN_FRAMES = 4;         // ~0.5s of loud speech = definite barge-in
+  const BARGE_IN_THRESHOLD = 2000;   // VERY loud — only direct speech into mic (not background)
+  const BARGE_IN_FRAMES = 6;         // ~0.75s of sustained loud speech required
+  const BARGE_IN_COOLDOWN_MS = 3000; // After rejected barge-in, ignore for 3s
 
   function processAudio(mulawBuffer: Buffer): void {
     if (closed) return;
@@ -123,13 +125,18 @@ export function createSarvamSTTSession(
 
     // ── Barge-in detection: user speaking while bot talks ──
     if (botSpeaking) {
+      // Skip barge-in check during cooldown
+      if (Date.now() < lastBargeInRejectTime + BARGE_IN_COOLDOWN_MS) {
+        return;
+      }
+
       if (rms > BARGE_IN_THRESHOLD) {
         bargeInFrames++;
         bargeInBuffer.push(pcmBuffer);
         if (bargeInFrames >= BARGE_IN_FRAMES) {
-          // Verify it's actual speech, not just noise, using VAD
+          // Verify it's actual speech, not just noise, using VAD at max aggressiveness
           const combinedPcm = Buffer.concat(bargeInBuffer);
-          const vad = detectVoice(combinedPcm, { aggressiveness: 2 });
+          const vad = detectVoice(combinedPcm, { aggressiveness: 3 });
 
           if (vad.isSpeech) {
             console.log('🗣️  BARGE-IN detected! User is interrupting.');
@@ -147,10 +154,11 @@ export function createSarvamSTTSession(
             // Fire interrupt callback
             onInterrupt();
           } else {
-            // It's noise, not speech — reset and keep playing
-            console.log('🔇 Barge-in rejected (noise, not speech)');
+            // It's noise, not speech — cooldown to avoid repeated checks
+            console.log('🔇 Barge-in rejected (noise, not speech) — cooldown 3s');
             bargeInFrames = 0;
             bargeInBuffer = [];
+            lastBargeInRejectTime = Date.now();
           }
         }
       } else {

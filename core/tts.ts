@@ -77,6 +77,7 @@ export function sarvamStreamTTS(options: TTSStreamOptions): TTSHandle {
         speaker,
         target_language_code: langCode,
         output_audio_codec: 'mulaw',
+        pace: 0.75,  // Slower for natural phone conversation (range: 0.5–2.0, default: 1.0)
       },
     }));
 
